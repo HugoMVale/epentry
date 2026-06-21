@@ -1,0 +1,26 @@
+{
+    "ruff.path": [
+        "uv",
+        "run",
+        "--frozen",
+        "ruff"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "python.analysis.diagnosticMode": "openFilesOnly",
+    "python.languageServer": "pyrefly",
+    "[python]": {
+        "editor.rulers": [
+            90
+        ],
+        "editor.inlayHints.enabled": "off",
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.codeActionsOnSave": {
+            "source.fixAll": "explicit",
+            "source.fixAll.ruff": "explicit",
+            "source.organizeImports": "never",
+            "source.organizeImports.ruff": "never"
+        }
+    }
+}
