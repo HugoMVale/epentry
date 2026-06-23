@@ -5,12 +5,12 @@ import numpy as np
 import pyvista as pv
 from matplotlib.figure import Figure
 
-from epentry.engine import Box, Walk
+from epentry.engine import Box, WalkResult
 
 
 def plot_sim_matplotlib(
     box: Box,
-    walk: Walk | None = None,
+    walk: WalkResult | None = None,
     resolution: int = 18,
     alpha: float = 0.5,
 ) -> Figure:
@@ -41,20 +41,18 @@ def plot_sim_matplotlib(
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
 
-    particles = box.particles
-    unique_groups = np.unique([p.group for p in particles])
     base_cmap = plt.get_cmap("tab10")
     group_to_color = {
-        group: base_cmap(i % base_cmap.N) for i, group in enumerate(unique_groups)
+        group: base_cmap(i % base_cmap.N) for i, group in enumerate(np.unique(box.groups))
     }
 
     u = np.linspace(0, 2 * pi, resolution)
     v = np.linspace(0, pi, resolution)
 
-    for p in particles:
-        c = p.center
-        r = p.radius
-        color = group_to_color[p.group]
+    for i in range(box.Nt):
+        c = box.centers[i]
+        r = box.radii[i]
+        color = group_to_color[box.groups[i]]
 
         x = c[0] + r * np.outer(np.cos(u), np.sin(v))
         y = c[1] + r * np.outer(np.sin(u), np.sin(v))
@@ -95,7 +93,7 @@ def plot_sim_matplotlib(
 
 def plot_sim_pyvista(
     box: Box,
-    walk: Walk | None = None,
+    walk: WalkResult | None = None,
     resolution: int = 18,
     alpha: float = 0.5,
 ) -> pv.Plotter:
@@ -123,15 +121,10 @@ def plot_sim_pyvista(
     """
     plotter = pv.Plotter()
 
-    particles = box.particles
-    centers = np.array([p.center for p in particles])
-    radii = np.array([p.radius for p in particles])
-    groups = np.array([p.group for p in particles])
+    point_cloud = pv.PolyData(box.centers)
+    point_cloud["radius"] = box.radii
 
-    point_cloud = pv.PolyData(centers)
-    point_cloud["radius"] = radii
-
-    unique_groups, group_indices = np.unique(groups, return_inverse=True)
+    unique_groups, group_indices = np.unique(box.groups, return_inverse=True)
     n_groups = len(unique_groups)
     point_cloud["group_idx"] = group_indices
 
