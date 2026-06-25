@@ -1,6 +1,5 @@
 import importlib.metadata
 
-from epentry.engine import *
-from epentry.view import *
+from epentry.box import *
 
 __version__ = importlib.metadata.version("epentry")

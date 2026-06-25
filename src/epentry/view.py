@@ -5,11 +5,13 @@ import numpy as np
 import pyvista as pv
 from matplotlib.figure import Figure
 
-from epentry.engine import Box, WalkResult
+from epentry.engine import NBox, WalkResult
+
+__all__ = ["plot_sim_matplotlib", "plot_sim_pyvista"]
 
 
 def plot_sim_matplotlib(
-    box: Box,
+    box: NBox,
     walk: WalkResult | None = None,
     resolution: int = 18,
     alpha: float = 0.5,
@@ -92,7 +94,7 @@ def plot_sim_matplotlib(
 
 
 def plot_sim_pyvista(
-    box: Box,
+    box: NBox,
     walk: WalkResult | None = None,
     resolution: int = 18,
     alpha: float = 0.5,
