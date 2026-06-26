@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import math
 from math import pi
 
@@ -217,7 +215,7 @@ def rsa(box: NBox) -> bool:
 
     # Place particles sequentially without overlap
     abort = False
-    max_attempts = 100 * Nt
+    max_attempts = 100 * Nt  # heuristic
     Ns_actual = np.zeros_like(Ns)
     groups = np.repeat(np.arange(rs.size), Ns)
     for k in range(Nt):
@@ -428,6 +426,8 @@ def point_inside_any_particle(
 
     Parameters
     ----------
+    box : NBox
+        Box object containing the particle ensemble.
     point : NDArray
         Point coordinates.
     rtol : float
@@ -694,6 +694,10 @@ def simulate_walk(
         Object containing the random walk trajectory, and information about the particle
         hit (if any) and time taken for the walk.
     """
+    # Check that the box has been filled with particles
+    if box.Nt == 0:
+        raise ValueError("Box has no particles. Run rsa() to fill the box first.")
+
     # Find a free initial position for the radical
     X = np.empty(3, dtype=np.float64)
     Lbox = box.Lbox
@@ -731,7 +735,7 @@ def simulate_walk(
                 break
         X[:] = Xtry
         trajectory[step, :] = X
-        time += R**2 / (6.0 * D)
+        time += R**2 / (6.0 * D)  # Mean first-passage time
 
         # Check if point is numerically close to any particle surface
         success, idx_particle = point_inside_any_particle(box, X, rtol)

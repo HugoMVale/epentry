@@ -1,8 +1,10 @@
 from textwrap import dedent
+from typing import Literal
 
+import numpy as np
 import pyvista as pv
 from matplotlib.figure import Figure
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike
 
 import epentry.engine as engine
 import epentry.view as view
@@ -17,36 +19,61 @@ class Box:
 
     Parameters
     ----------
-    rs : NDArray
-        Particle radii of each group.
-    vfs : NDArray
-        Target volume fractions of each group.
+    rs : ArrayLike
+        Radii of each particle group.
+    vfs : ArrayLike
+        Target volume fractions of each particle group.
     Nt : int
         Target total number of particles in the box.
+
+
+    Examples
+    --------
+    >>> from epentry import Box
+    >>> box = Box(rs=[1.0, 2.0], vfs=[0.1, 0.2], Nt=100)
+    >>> box.rsa()
+    >>> box.plot()
+    >>> walk_result = box.simulate_walk(D=1.0)
+    >>> box.plot(walk_result)
     """
 
-    nbox: NBox
+    _nbox: NBox
 
     def __init__(
         self,
-        rs: NDArray,
-        vfs: NDArray,
+        rs: ArrayLike,
+        vfs: ArrayLike,
         Nt: int,
     ) -> None:
-        self.nbox = NBox(rs, vfs, Nt)
+        rs = np.asarray(rs, dtype=np.float64)
+        vfs = np.asarray(vfs, dtype=np.float64)
+        Nt = int(Nt)
+
+        if len(rs) != len(vfs):
+            raise ValueError(
+                f"Length of rs ({len(rs)}) must match length of vfs ({len(vfs)})."
+            )
+        if np.any(rs <= 0):
+            raise ValueError("All particle radii must be positive.")
+        if np.any(vfs < 0) or np.any(vfs > 1):
+            raise ValueError("All volume fractions must be in the range [0, 1].")
+        if Nt <= 0:
+            raise ValueError("Total number of particles must be positive.")
+
+        self._nbox = NBox(rs, vfs, Nt)
 
     def __repr__(self) -> str:
         """Return a string representation of the Box object."""
         return dedent(f"""\
             Box(
-                rs          = {self.nbox.rs},
-                vfs_target  = {self.nbox.vfs_target},
-                vs          = {self.nbox.vfs()},
-                Nt_target   = {self.nbox.Nt_target},
-                Nt          = {self.nbox.Nt},
-                Ns          = {self.nbox.Ns},
-                Lbox        = {self.nbox.Lbox},
-                success_rsa = {self.nbox.success_rsa},
+                rs          = {self._nbox.rs},
+                vfs_target  = {self._nbox.vfs_target},
+                vs          = {self._nbox.vfs()},
+                Nt_target   = {self._nbox.Nt_target},
+                Nt          = {self._nbox.Nt},
+                Ns          = {self._nbox.Ns},
+                Lbox        = {self._nbox.Lbox},
+                success_rsa = {self._nbox.success_rsa},
             )
         """)
 
@@ -69,25 +96,28 @@ class Box:
             `True` if all particles were successfully placed without overlap, `False`
             otherwise.
         """
-        return engine.rsa(self.nbox)
+        return engine.rsa(self._nbox)
 
-    def plot_with_matplotlib(
+    def plot(
         self,
         walk: WalkResult | None = None,
+        backend: Literal["matplotlib", "pyvista"] = "pyvista",
         resolution: int = 18,
         alpha: float = 0.5,
-    ) -> Figure:
+    ) -> Figure | pv.Plotter:
         """
-        Plot a 3D visualization of the particles the random walk using `matplotlib`.
+        Plot a 3D visualization of the particles and the random walk.
 
         Each particle is rendered as a sphere and colored according to its
         group index. If present, the trajectory is overlaid as a 3D line.
 
         Parameters
         ----------
-        walk : Walk
+        walk : WalkResult | None
             Walk object containing the trajectory to overlay. If `None`, only the
             particle ensemble will be plotted.
+        backend : Literal["matplotlib", "pyvista"]
+            Backend to use for plotting.
         resolution : int
             Resolution of the sphere mesh used to render each particle.
             Higher values produce smoother spheres but increase rendering cost.
@@ -96,38 +126,17 @@ class Box:
 
         Returns
         -------
-        matplotlib.figure.Figure
+        matplotlib.figure.Figure | pyvista.Plotter
             Figure object containing the 3D rendering.
         """
-        return view.plot_sim_matplotlib(self.nbox, walk, resolution, alpha)
-
-    def plot_with_pyvista(
-        self,
-        walk: WalkResult | None = None,
-        resolution: int = 18,
-        alpha: float = 0.5,
-    ) -> pv.Plotter:
-        """
-        Plot a 3D visualization of the particles the random walk using `PyVista`.
-
-        Parameters
-        ----------
-        walk : Walk
-            Walk object containing the trajectory to overlay. If `None`, only the
-            particle ensemble will be plotted.
-        resolution : int
-            Resolution of the sphere mesh used to render each particle.
-            Higher values produce smoother spheres but increase rendering cost.
-        alpha : float
-            Transparency of particle surfaces in the plot.
-
-        Returns
-        -------
-        pyvista.Plotter
-            Plotter object containing the 3D rendering. Call `show()` on the
-            returned object to display the plot.
-        """
-        return view.plot_sim_pyvista(self.nbox, walk, resolution, alpha)
+        if backend == "matplotlib":
+            return view.plot_with_matplotlib(self._nbox, walk, resolution, alpha)
+        elif backend == "pyvista":
+            return view.plot_with_pyvista(self._nbox, walk, resolution, alpha)
+        else:
+            raise ValueError(
+                f"Invalid backend '{backend}'. Must be 'matplotlib' or 'pyvista'."
+            )
 
     def simulate_walk(
         self,
@@ -141,8 +150,6 @@ class Box:
 
         Notes
         -----
-        * The algorithm is O(N²), which is not ideal for large particle counts. Can be
-        improved by implementing cell lists. To be done.
         * There are "wall effects" because the random walker is not allowed to step
         outside the box and we do not have periodic boundary conditions.
 
@@ -166,4 +173,4 @@ class Box:
             Object containing the random walk trajectory, and information about the
             particle hit (if any) and time taken for the walk.
         """
-        return engine.simulate_walk(self.nbox, D, rtol, maxsteps)
+        return engine.simulate_walk(self._nbox, D, rtol, maxsteps)
