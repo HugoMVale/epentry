@@ -7,10 +7,10 @@ from matplotlib.figure import Figure
 
 from epentry.engine import NBox, WalkResult
 
-__all__ = ["plot_sim_matplotlib", "plot_sim_pyvista"]
+__all__ = ["plot_with_matplotlib", "plot_with_pyvista"]
 
 
-def plot_sim_matplotlib(
+def plot_with_matplotlib(
     box: NBox,
     walk: WalkResult | None = None,
     resolution: int = 18,
@@ -93,7 +93,7 @@ def plot_sim_matplotlib(
     return fig
 
 
-def plot_sim_pyvista(
+def plot_with_pyvista(
     box: NBox,
     walk: WalkResult | None = None,
     resolution: int = 18,
