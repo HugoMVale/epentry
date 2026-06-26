@@ -6,45 +6,44 @@ from epentry import Box
 
 def test_Box_feasible():
     # Initialization
-    rs = np.array([1.0, 0.5, 0.25])
-    vfs = np.array([0.1, 0.01, 0.001])
+    rs = [1.0, 0.5, 0.25]
+    vfs = [0.1, 0.01, 0.001]
     Nt = 1000
     box = Box(rs, vfs, Nt)
-    assert np.allclose(box.nbox.rs, rs)
-    assert np.allclose(box.nbox.vfs_target, vfs)
-    assert box.nbox.Nt_target == Nt
-    assert np.allclose(box.nbox.vfs(), 0.0)
-    assert np.allclose(box.nbox.Ns, 0)
-    assert box.nbox.Nt == 0
-    assert np.isclose(box.nbox.Lbox, 0.0)
-    assert not box.nbox.success_rsa
+    assert np.allclose(box._nbox.rs, rs)
+    assert np.allclose(box._nbox.vfs_target, vfs)
+    assert box._nbox.Nt_target == Nt
+    assert np.allclose(box._nbox.vfs(), 0.0)
+    assert np.allclose(box._nbox.Ns, 0)
+    assert box._nbox.Nt == 0
+    assert np.isclose(box._nbox.Lbox, 0.0)
+    assert not box._nbox.success_rsa
     # RSA (all particles should be placed successfully)
     success_rsa = box.rsa()
     assert success_rsa
-    assert box.nbox.success_rsa
-    assert box.nbox.Nt == Nt
-    assert len(box.nbox.centers) == Nt
-    assert len(box.nbox.groups) == Nt
-    assert len(box.nbox.radii) == Nt
-    assert not np.allclose(box.nbox.centers[0], box.nbox.centers[-1])
+    assert box._nbox.success_rsa
+    assert box._nbox.Nt == Nt
+    assert len(box._nbox.centers) == Nt
+    assert len(box._nbox.groups) == Nt
+    assert len(box._nbox.radii) == Nt
+    assert not np.allclose(box._nbox.centers[0], box._nbox.centers[-1])
 
 
 def test_Box_infeasible():
     # This should break due to high volume fraction
-    box = Box(np.array([1.0]), np.array([0.7]), 100)
+    box = Box([1.0], [0.7], 100)
     _ = box.rsa()
-    assert not box.nbox.success_rsa
-    assert box.nbox.Nt > 0
-    assert box.nbox.Nt < box.nbox.Nt_target
-    assert len(box.nbox.centers) == box.nbox.Nt
-    assert len(box.nbox.groups) == box.nbox.Nt
-    assert len(box.nbox.radii) == box.nbox.Nt
+    assert not box._nbox.success_rsa
+    assert box._nbox.Nt > 0
+    assert box._nbox.Nt < box._nbox.Nt_target
+    assert len(box._nbox.centers) == box._nbox.Nt
+    assert len(box._nbox.groups) == box._nbox.Nt
+    assert len(box._nbox.radii) == box._nbox.Nt
 
 
 def test_Box_cell_build():
     box = engine.NBox(np.array([1.0]), np.array([0.3]), 1000)
     engine.rsa(box)
-    engine.build_cell_list(box)
     X = np.random.uniform(0, box.Lbox, size=(1000, 3))
     once_inside = False
     once_outside = False
@@ -65,7 +64,7 @@ def test_Box_cell_build():
 
 
 def test_simulate_walk():
-    box = Box(np.array([1.0]), np.array([0.3]), Nt=100)
+    box = Box([1.0], [0.3], Nt=100)
     _ = box.rsa()
     walk = box.simulate_walk(D=1e-8)
     assert walk.success
