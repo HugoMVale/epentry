@@ -66,37 +66,53 @@ class Box:
         """Return a string representation of the Box object."""
         return dedent(f"""\
             Box(
-                rs          = {self._nbox.rs},
-                vfs_target  = {self._nbox.vfs_target},
-                vs          = {self._nbox.vfs()},
-                Nt_target   = {self._nbox.Nt_target},
-                Nt          = {self._nbox.Nt},
-                Ns          = {self._nbox.Ns},
-                Lbox        = {self._nbox.Lbox},
-                success_rsa = {self._nbox.success_rsa},
+                rs         = {self._nbox.rs},
+                vfs_target = {self._nbox.vfs_target},
+                vfs        = {self._nbox.vfs()},
+                Nt_target  = {self._nbox.Nt_target},
+                Nt         = {self._nbox.Nt},
+                Ns         = {self._nbox.Ns},
+                length     = {self._nbox.length},
+                method     = {engine.METHODS.get(self._nbox.method, "None")},
+                periodic   = {self._nbox.periodic}
+                success    = {self._nbox.success},
             )
         """)
 
-    def rsa(self) -> bool:
-        r"""
-        Generate a non-overlapping particle ensemble using random sequential addition.
+    def place_particles(
+        self,
+        method: Literal["RSA", "BCC", "Equilibrium"] = "RSA",
+        periodic: bool = True,
+    ) -> bool:
+        r"""Generate a non-overlapping particle ensemble using a given method.
 
-        Particles are placed uniformly at random in a cubic simulation box. Candidate
+        RSA: Particles are placed uniformly at random in a cubic simulation box. Candidate
         positions that overlap previously placed particles are rejected until a valid
-        position is found.
+        position is found. Failure to place all particles is likely at a high total volume
+        fraction
 
-        Failure to place all particles is likely at a high total volume fraction,
-        which makes it difficult to find non-overlapping positions for all particles.
-        In this case, the box will contain as many particles as possible given the
-        requested volume fractions and total particle count.
+        Parameters
+        ----------
+        periodic : bool
+            Whether to apply periodic boundary conditions.
 
         Returns
         -------
         bool
             `True` if all particles were successfully placed without overlap, `False`
             otherwise.
+
         """
-        return engine.rsa(self._nbox)
+        if method == "RSA":
+            return engine.rsa(self._nbox, periodic)
+        elif method == "BCC":
+            return engine.bcc(self._nbox)
+        elif method == "Equilibrium":
+            return engine.equilibrium_distribution(self._nbox, n_sweeps=200)
+        else:
+            raise ValueError(
+                f"Invalid method '{method}'. Must be 'RSA', 'BCC', or 'Equilibrium'."
+            )
 
     def plot(
         self,
