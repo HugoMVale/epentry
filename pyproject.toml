@@ -10,6 +10,7 @@ dependencies = [
     "matplotlib>=3.11.0",
     "numba>=0.65.1",
     "numpy>=2.4.6",
+    "pandas>=3.0.3",
     "pyvista[jupyter]>=0.48.4",
     "scipy>=1.18.0",
     "trame>=3.13.2",
