@@ -90,6 +90,8 @@ class NBox:
     ----------
     centers : NDArray
         Particle center coordinates.
+    cell_of : NDArray
+        Cell index for each particle in the cell list.
     cell_size : float
         Size of each cell in the cell list.
     groups : NDArray
@@ -110,6 +112,8 @@ class NBox:
         Target total number of particles.
     periodic : bool
         Whether to apply periodic boundary conditions.
+    prev : NDArray
+        Previous particle index for each particle in the cell list.
     radii : NDArray
         Particle radii.
     rmin : float
@@ -139,6 +143,8 @@ class NBox:
     success: bool
     head: nb.int64[:]
     next: nb.int64[:]
+    prev: nb.int64[:]
+    cell_of: nb.int64[:]
     cell_size: nb.float64
     nc: nb.int64
     periodic: bool
@@ -174,6 +180,8 @@ class NBox:
         self.nc = 0
         self.head = np.empty(0, np.int64)
         self.next = np.empty(0, np.int64)
+        self.prev = np.empty(0, np.int64)
+        self.cell_of = np.empty(0, np.int64)
 
     def vfs(self) -> NDArray:
         r"""
@@ -262,9 +270,10 @@ def rsa(box: NBox, periodic: bool = True, cell_list: bool = True) -> bool:
         box.radii[k] = rs[i]
         attempts = 0
         while True:
-            box.centers[k, 0] = np.random.uniform(0.0, box.length)
-            box.centers[k, 1] = np.random.uniform(0.0, box.length)
-            box.centers[k, 2] = np.random.uniform(0.0, box.length)
+            s = 0.0 if box.periodic else box.radii[k]
+            box.centers[k, 0] = np.random.uniform(s, box.length - s)
+            box.centers[k, 1] = np.random.uniform(s, box.length - s)
+            box.centers[k, 2] = np.random.uniform(s, box.length - s)
             attempts += 1
             overlap = False
             for j in range(k):
@@ -525,8 +534,12 @@ def build_cell_list(box: NBox) -> None:
     ncells_total = nc**3
     h = box.length / nc
 
-    head = -np.ones(ncells_total, dtype=np.int64)
-    next = -np.ones(box.Nt, dtype=np.int64)
+    box.cell_size = h
+    box.nc = nc
+    box.head = -np.ones(ncells_total, dtype=np.int64)
+    box.next = -np.ones(box.Nt, dtype=np.int64)
+    box.prev = -np.ones(box.Nt, dtype=np.int64)
+    box.cell_of = -np.ones(box.Nt, dtype=np.int64)
 
     for i in range(box.Nt):
         x = box.centers[i, 0]
@@ -534,14 +547,7 @@ def build_cell_list(box: NBox) -> None:
         z = box.centers[i, 2]
 
         _, _, _, c = cell_index(x, y, z, h, nc, box.periodic)
-
-        next[i] = head[c]
-        head[c] = i
-
-    box.cell_size = h
-    box.nc = nc
-    box.head = head
-    box.next = next
+        cell_list_insert(box, i, c)
 
 
 @nb.njit(fastmath=True)
@@ -599,6 +605,7 @@ def simulate_walk(
     # Main random walking loop
     time = 0.0
     success = False
+    stuck = False
     idx_particle = -1
     Xtry = np.empty(3, dtype=np.float64)
 
@@ -606,6 +613,7 @@ def simulate_walk(
         # Find radius of largest sphere centered about X
         R = clearance_radius(box, X)
         if R <= box.rmin * rtol / 10:
+            stuck = True
             break  # If the clearance radius is too small, terminate the walk
 
         # Move to random point on the sphere of radius R centered about X
@@ -639,10 +647,11 @@ def simulate_walk(
         particle_radius = -1.0
         particle_center = np.zeros(3, dtype=np.float64)
 
+    idx_step = step if stuck else step + 1
     return WalkResult(
         success,
         time,
-        trajectory[: step + 1],
+        trajectory[:idx_step],
         particle_group,
         particle_radius,
         particle_center,
@@ -760,6 +769,17 @@ def cell_index(
 
     c = ix + iy * nc + iz * nc**2
     return ix, iy, iz, c
+
+
+@nb.njit(inline="always")
+def cell_list_insert(box: NBox, i: int, c: int) -> None:
+    """Insert particle `i` at the head of cell `c`'s linked list."""
+    box.next[i] = box.head[c]
+    box.prev[i] = -1
+    if box.head[c] != -1:
+        box.prev[box.head[c]] = i
+    box.head[c] = i
+    box.cell_of[i] = c
 
 
 @nb.njit(inline="always")
