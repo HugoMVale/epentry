@@ -27,7 +27,7 @@ METHODS = {
 
 @nb.experimental.jitclass
 class WalkResult:
-    r"""
+    """
     Result of a random walk of a point particle in a box containing an ensemble of
     non-overlapping spheres.
 
@@ -74,7 +74,7 @@ class WalkResult:
 
 @nb.experimental.jitclass
 class NBox:
-    r"""
+    """
     Ensemble of particles in a rectangular box.
 
     Parameters
@@ -184,13 +184,8 @@ class NBox:
         self.cell_of = np.empty(0, np.int64)
 
     def vfs(self) -> NDArray:
-        r"""
-        Compute the approximate volume fractions of each particle group in the box.
-
-        Note
-        ----
-        Particles close to the wall will have a fraction of their volume outside the box.
-        This 'lost' volume is not accounted for in this calculation. To be done.
+        """
+        Compute the volume fractions of each particle group in the box.
 
         Returns
         -------
@@ -205,8 +200,12 @@ class NBox:
 
 
 @nb.njit(fastmath=True)
-def rsa(box: NBox, periodic: bool = True, cell_list: bool = True) -> bool:
-    r"""
+def rsa(
+    box: NBox,
+    periodic: bool = True,
+    cell_list: bool = True,
+) -> bool:
+    """
     Generate a non-overlapping particle ensemble using random sequential addition.
 
     Particles are placed uniformly at random in a cubic simulation box. Candidate
@@ -217,6 +216,11 @@ def rsa(box: NBox, periodic: bool = True, cell_list: bool = True) -> bool:
     which makes it difficult to find non-overlapping positions for all particles.
     In this case, the box will contain as many particles as possible given the
     requested volume fractions and total particle count.
+
+    Note
+    ----
+    Particle overlap is still checked using naive O(N²) pairwise comparisons. To be
+    improved with cell list.
 
     Parameters
     ----------
@@ -245,7 +249,7 @@ def rsa(box: NBox, periodic: bool = True, cell_list: bool = True) -> bool:
 
     # Tentative particle counts of each group
     Ns = np.rint(Nt * ns / nt).astype(np.int64)
-    Nt = min(Ns.sum(), Nt)
+    Nt = Ns.sum()
 
     # Box length
     box.length = (Nt / nt) ** (1 / 3)
@@ -263,9 +267,9 @@ def rsa(box: NBox, periodic: bool = True, cell_list: bool = True) -> bool:
     abort = False
     max_attempts = 100 * Nt  # heuristic
     Ns_actual = np.zeros_like(Ns)
-    groups = np.repeat(np.arange(rs.size), Ns)
+    group_ids = np.repeat(np.arange(rs.size), Ns)
     for k in range(Nt):
-        i = groups[k]
+        i = group_ids[k]
         box.groups[k] = i
         box.radii[k] = rs[i]
         attempts = 0
@@ -310,7 +314,7 @@ def rsa(box: NBox, periodic: bool = True, cell_list: bool = True) -> bool:
 
 @nb.njit(fastmath=True)
 def bcc(box: NBox, cell_list: bool = True) -> bool:
-    r"""
+    """
     Generate a body-centered cubic (BCC) particle arrangement.
 
     Particles are placed on a perfect BCC lattice fitted into a cubic simulation
@@ -391,7 +395,7 @@ def equilibrium_distribution(
     n_sweeps: int = 200,
     target_accept: float = 0.35,
 ) -> bool:
-    r"""
+    """
     Generate an equilibrated ensemble of hard spheres.
 
     A BCC lattice is first generated, and then an adaptive Monte Carlo procedure is
@@ -418,12 +422,13 @@ def equilibrium_distribution(
         `True` if the equilibration was successful, `False` otherwise.
     """
     # Generate BCC lattice
-    bcc(box, cell_list=False)
+    bcc(box, cell_list=True)
 
     # Compute initial gap between nearest neighbors
     r = box.radii[0]
     Nt = box.Nt
     L = box.length
+    # TBD: we should get nc it from the lattice
     nc = max(1, int(np.round((Nt / 2.0) ** (1.0 / 3.0))))
     a = L / nc
     gap = math.sqrt(3) / 2 * a - 2.0 * r
@@ -438,7 +443,7 @@ def equilibrium_distribution(
         naccept = 0
 
         for _ in range(block):
-            naccept += mc_sweep(box, delta)
+            naccept += montecarlo_sweep(box, delta)
 
         naccept /= block * Nt
 
@@ -447,22 +452,25 @@ def equilibrium_distribution(
 
     box.method = METHOD_EQUIL
     box.success = True
-    build_cell_list(box)
 
     return box.success
 
 
 @nb.njit(fastmath=True)
-def mc_sweep(box: NBox, delta: float) -> int:
-    r"""
+def montecarlo_sweep(box: NBox, delta: float) -> int:
+    """
     Perform one Monte Carlo sweep for hard-sphere particles.
+
+    The cell list variables must be initialized before calling this function, for example
+    with `build_cell_list`.
 
     Parameters
     ----------
     box : NBox
-        Box object containing the particle ensemble.
+        Box object containing the particle ensemble. Updated in-place.
     delta : float
-        Maximum displacement for each particle in the sweep.
+        Maximum displacement for each particle in the sweep. Must be smaller than the
+        cell size to ensure a true overlap is not missed.
 
     Returns
     -------
@@ -471,42 +479,27 @@ def mc_sweep(box: NBox, delta: float) -> int:
     """
     naccepted = 0
     L = box.length
-    Nt = box.Nt
+    tcenter = np.empty(3, dtype=np.float64)
 
-    for i in range(Nt):
-        # Store old position
-        ox = box.centers[i, 0]
-        oy = box.centers[i, 1]
-        oz = box.centers[i, 2]
+    for i in range(box.Nt):
+        tcenter[0] = box.centers[i, 0] + delta * (2.0 * np.random.random() - 1.0)
+        tcenter[1] = box.centers[i, 1] + delta * (2.0 * np.random.random() - 1.0)
+        tcenter[2] = box.centers[i, 2] + delta * (2.0 * np.random.random() - 1.0)
 
-        # Propose move
-        box.centers[i, 0] = ox + delta * (2.0 * np.random.random() - 1.0)
-        box.centers[i, 1] = oy + delta * (2.0 * np.random.random() - 1.0)
-        box.centers[i, 2] = oz + delta * (2.0 * np.random.random() - 1.0)
-
-        # Check overlap
-        overlap = False
-        for j in range(Nt):
-            if j == i:
-                continue
-
-            if particles_overlap(box, i, j):
-                overlap = True
-                break
-
-        if overlap:
-            # reject → restore
-            box.centers[i, 0] = ox
-            box.centers[i, 1] = oy
-            box.centers[i, 2] = oz
-
+        if box.periodic:
+            tcenter[0] = wrap(tcenter[0], L)
+            tcenter[1] = wrap(tcenter[1], L)
+            tcenter[2] = wrap(tcenter[2], L)
         else:
-            # accept → enforce PBC
-            if box.periodic:
-                box.centers[i, 0] = wrap(box.centers[i, 0], L)
-                box.centers[i, 1] = wrap(box.centers[i, 1], L)
-                box.centers[i, 2] = wrap(box.centers[i, 2], L)
+            if not particle_inside_box(box, tcenter, box.radii[i]):
+                continue  # reject: particle would poke through the wall
 
+        overlap, c = trial_overlaps_any_particle(box, i, tcenter)
+        if not overlap:
+            box.centers[i, 0] = tcenter[0]
+            box.centers[i, 1] = tcenter[1]
+            box.centers[i, 2] = tcenter[2]
+            cell_list_move(box, i, c)
             naccepted += 1
 
     return naccepted
@@ -514,7 +507,8 @@ def mc_sweep(box: NBox, delta: float) -> int:
 
 @nb.njit(fastmath=True)
 def build_cell_list(box: NBox) -> None:
-    """Build a cell list for the particles in the box.
+    """
+    Build a cell list for the particles in the box.
 
     Builds a cell list for the particles in the box to accelerate neighbor searches. The
     cell list is a 3D grid of cubic cells that covers the entire box. Each particle is
@@ -554,7 +548,7 @@ def build_cell_list(box: NBox) -> None:
 def simulate_walk(
     box: NBox, D: float, rtol: float = 1e-3, maxsteps: int = 100
 ) -> WalkResult:
-    r"""
+    """
     Simulate a random walk of a point particle in a box containing an ensemble of
     non-overlapping spheres.
 
@@ -583,8 +577,12 @@ def simulate_walk(
     # Check that the box has been filled with particles
     if box.Nt == 0:
         raise ValueError(
-            "Box has no particles. Run `rsa()` or `bcc()` to fill the box first."
+            "Box has no particles. Run particle placement method to fill the box first."
         )
+
+    # Check that the box has a cell list built
+    if box.nc == 0:
+        raise ValueError("Box has no cell list. This should not happen!")
 
     # Find a free initial position for the radical
     X = np.empty(3, dtype=np.float64)
@@ -599,6 +597,7 @@ def simulate_walk(
             break
 
     # Preallocate trajectory array with a maximum number of steps
+    maxsteps = max(1, maxsteps)
     trajectory = np.empty((maxsteps + 1, 3), dtype=np.float64)
     trajectory[0, :] = X
 
@@ -659,8 +658,46 @@ def simulate_walk(
 
 
 @nb.njit(inline="always")
+def wrap(x: float, L: float) -> float:
+    """
+    Wrap a coordinate into the box using periodic boundary conditions.
+
+    Parameters
+    ----------
+    x : float
+        Coordinate to wrap.
+    L : float
+        Box length.
+
+    Returns
+    -------
+    float
+        Wrapped coordinate.
+    """
+    if x < 0.0:
+        x += L
+    elif x >= L:
+        x -= L
+
+    return x
+
+
+@nb.njit(inline="always")
+def neighbor_cell_1d(i: int, di: int, nc: int, periodic: bool) -> int:
+    """Compute neighbor cell index along one dimension, or -1 if out of bounds."""
+    ni = i + di
+    if periodic:
+        return ni % nc
+    else:
+        if ni < 0 or ni >= nc:
+            return -1
+        return ni
+
+
+@nb.njit(inline="always")
 def apply_mic(dx: float, dy: float, dz: float, L: float) -> tuple[float, float, float]:
-    """Apply the Minimum Image Convention (MIC) to a displacement vector.
+    """
+    Apply the Minimum Image Convention (MIC) to a displacement vector.
 
     Parameters
     ----------
@@ -693,30 +730,6 @@ def apply_mic(dx: float, dy: float, dz: float, L: float) -> tuple[float, float, 
         dz += L
 
     return dx, dy, dz
-
-
-@nb.njit(inline="always")
-def wrap(x: float, L: float) -> float:
-    """Wrap a coordinate into the box using periodic boundary conditions.
-
-    Parameters
-    ----------
-    x : float
-        Coordinate to wrap.
-    L : float
-        Box length.
-
-    Returns
-    -------
-    float
-        Wrapped coordinate.
-    """
-    if x < 0.0:
-        x += L
-    elif x >= L:
-        x -= L
-
-    return x
 
 
 @nb.njit(inline="always")
@@ -768,12 +781,24 @@ def cell_index(
             iz = nc - 1
 
     c = ix + iy * nc + iz * nc**2
+
     return ix, iy, iz, c
 
 
 @nb.njit(inline="always")
 def cell_list_insert(box: NBox, i: int, c: int) -> None:
-    """Insert particle `i` at the head of cell `c`'s linked list."""
+    """
+    Insert particle `i` at the head of cell `c`'s linked list.
+
+    Parameters
+    ----------
+    box : NBox
+        Box object containing the particle ensemble. Updated in-place.
+    i : int
+        Index of the particle to insert.
+    c : int
+        Index of the cell to insert the particle into.
+    """
     box.next[i] = box.head[c]
     box.prev[i] = -1
     if box.head[c] != -1:
@@ -783,20 +808,135 @@ def cell_list_insert(box: NBox, i: int, c: int) -> None:
 
 
 @nb.njit(inline="always")
-def neighbor_cell_1d(i: int, di: int, nc: int, periodic: bool) -> int:
-    """Compute neighbor cell index along one dimension, or -1 if out of bounds."""
-    ni = i + di
-    if periodic:
-        return ni % nc
+def cell_list_remove(box: NBox, i: int) -> None:
+    """
+    Remove particle `i` from its current cell's linked list.
+
+    Parameters
+    ----------
+    box : NBox
+        Box object containing the particle ensemble. Updated in-place.
+    i : int
+        Index of the particle to remove.
+
+    Note
+    ----
+    This unlinks `i` using its stored `box.cell_of[i]`, `box.prev[i]`, and `box.next[i]`
+    values, so those must be up to date and consistent with `box.head` before calling.
+    `box.cell_of[i]` is set to `-1` on exit, but `box.prev[i]` and `box.next[i]` are
+    left stale, still pointing at the old neighbors in the cell it was removed from.
+    This function is not safe to call on its own: it must always be paired with a
+    subsequent `cell_list_insert` (as done in `cell_list_move`) to reset those links
+    for the particle's new cell. Calling it twice in a row on the same particle, or
+    leaving a particle "removed" without reinserting it, will corrupt the linked list.
+    """
+    c = box.cell_of[i]
+    p = box.prev[i]
+    n = box.next[i]
+
+    if p == -1:
+        box.head[c] = n
     else:
-        if ni < 0 or ni >= nc:
-            return -1
-        return ni
+        box.next[p] = n
+
+    if n != -1:
+        box.prev[n] = p
+
+    box.cell_of[i] = -1
+
+
+@nb.njit(inline="always")
+def cell_list_move(box: NBox, i: int, new_c: int) -> None:
+    """
+    Move particle `i` to cell `new_c`, updating the linked list.
+
+    Parameters
+    ----------
+    box : NBox
+        Box object containing the particle ensemble. Updated in-place.
+    i : int
+        Index of the particle to move.
+    new_c : int
+        Index of the new cell to move the particle into.
+    """
+    if new_c != box.cell_of[i]:
+        cell_list_remove(box, i)
+        cell_list_insert(box, i, new_c)
+
+
+@nb.njit(fastmath=True)
+def trial_overlaps_any_particle(box: NBox, i: int, tcenter: NDArray) -> tuple[bool, int]:
+    """
+    Check if a trial position for a particle overlaps any other particle.
+
+    Note
+    ----
+    Assumes `tcenter` has already been wrapped into `[0, box.length)` if `box.periodic`
+    is `True`, since cell lookup requires unwrapped coordinates to be mapped consistently
+    with `cell_index`.
+
+    Parameters
+    ----------
+    box : NBox
+        Box object containing the particle ensemble.
+    i : int
+        Index of the particle being trial-moved. Excluded from the check.
+    tcenter : NDArray
+        Trial center coordinates for particle `i`.
+
+    Returns
+    -------
+    tuple[bool, int]
+        `True` if the trial position overlaps another particle, `False` otherwise,
+        together with the linear cell index that `trial` falls in (so the caller
+        can reuse it for `cell_list_move` without recomputing it).
+    """
+    h = box.cell_size
+    nc = box.nc
+    L = box.length
+    periodic = box.periodic
+    ri = box.radii[i]
+
+    ix, iy, iz, c_self = cell_index(tcenter[0], tcenter[1], tcenter[2], h, nc, periodic)
+
+    for dx in (-1, 0, 1):
+        nx = neighbor_cell_1d(ix, dx, nc, periodic)
+        if nx == -1:
+            continue
+
+        for dy in (-1, 0, 1):
+            ny = neighbor_cell_1d(iy, dy, nc, periodic)
+            if ny == -1:
+                continue
+
+            for dz in (-1, 0, 1):
+                nz = neighbor_cell_1d(iz, dz, nc, periodic)
+                if nz == -1:
+                    continue
+
+                c = nx + nc * (ny + nc * nz)
+                p = box.head[c]
+
+                while p != -1:
+                    if p != i:
+                        cx = tcenter[0] - box.centers[p, 0]
+                        cy = tcenter[1] - box.centers[p, 1]
+                        cz = tcenter[2] - box.centers[p, 2]
+
+                        if periodic:
+                            cx, cy, cz = apply_mic(cx, cy, cz, L)
+
+                        if cx**2 + cy**2 + cz**2 <= (ri + box.radii[p]) ** 2:
+                            return True, c_self
+
+                    p = box.next[p]
+
+    return False, c_self
 
 
 @nb.njit(inline="always")
 def particles_overlap(box: NBox, i: int, j: int) -> bool:
-    r"""
+    """
     Check if two particles overlap, accounting for periodic boundary conditions
     if enabled in the box configuration.
 
@@ -826,7 +966,7 @@ def particles_overlap(box: NBox, i: int, j: int) -> bool:
 
 @nb.njit(inline="always")
 def point_inside_box(box: NBox, point: NDArray) -> bool:
-    r"""
+    """
     Check if a point is inside the box.
 
     Parameters
@@ -850,7 +990,7 @@ def point_inside_box(box: NBox, point: NDArray) -> bool:
 
 @nb.njit(inline="always")
 def point_inside_particle(box: NBox, i: int, point: NDArray, rtol: float = 0.0) -> bool:
-    r"""
+    """
     Check if a point is inside a particle, accounting for periodic boundary conditions
     if enabled in the box configuration.
 
@@ -883,48 +1023,10 @@ def point_inside_particle(box: NBox, i: int, point: NDArray, rtol: float = 0.0) 
 
 
 @nb.njit(fastmath=True)
-def _point_inside_any_particle(
-    box: NBox, point: NDArray, rtol: float = 0.0
-) -> tuple[bool, int]:
-    r"""
-    Check if a point is inside any particle, accounting for periodic boundary conditions
-    if enabled in the box configuration.
-
-    Note
-    ----
-    This is a naive O(N) implementation that checks all particles. It is kept for
-    reference and testing purposes. The `point_inside_any_particle` method implements
-    a more efficient O(1) algorithm using a cell list.
-
-    Parameters
-    ----------
-    box : NBox
-        Box object containing the particle ensemble.
-    point : NDArray
-        Point coordinates.
-    rtol : float
-        Relative tolerance for numerical precision when checking if the point is
-        inside the particle. The point is considered inside if it is within `rtol`
-        of the particle.
-
-    Returns
-    -------
-    tuple[bool, int]:
-        `True` if the point is inside any particle, `False` otherwise. The index of
-        the particle that the point is inside, or -1 if the point is not inside any
-        particle.
-    """
-    for i in range(box.Nt):
-        if point_inside_particle(box, i, point, rtol):
-            return (True, i)
-    return (False, -1)
-
-
-@nb.njit(fastmath=True)
 def point_inside_any_particle(
     box: NBox, point: NDArray, rtol: float = 0.0
 ) -> tuple[bool, int]:
-    r"""
+    """
     Check if a point is inside any particle.
 
     Parameters
@@ -978,17 +1080,18 @@ def point_inside_any_particle(
 
 
 @nb.njit(fastmath=True)
-def _clearance_radius(box: NBox, point: NDArray) -> float:
-    r"""
-    Compute the radius of the largest sphere centered at `point` that does not
-    overlap any particle. Accounts for periodic boundary conditions if enabled in the box
-    configuration.
+def _point_inside_any_particle(
+    box: NBox, point: NDArray, rtol: float = 0.0
+) -> tuple[bool, int]:  # pragma: no cover
+    """
+    Check if a point is inside any particle, accounting for periodic boundary conditions
+    if enabled in the box configuration.
 
     Note
     ----
     This is a naive O(N) implementation that checks all particles. It is kept for
-    reference and testing purposes. The `clearance_radius` method implements a more
-    efficient O(1) algorithm using a cell list.
+    reference and testing purposes. The `point_inside_any_particle` method implements
+    a more efficient O(1) algorithm using a cell list.
 
     Parameters
     ----------
@@ -996,35 +1099,196 @@ def _clearance_radius(box: NBox, point: NDArray) -> float:
         Box object containing the particle ensemble.
     point : NDArray
         Point coordinates.
+    rtol : float
+        Relative tolerance for numerical precision when checking if the point is
+        inside the particle. The point is considered inside if it is within `rtol`
+        of the particle.
+
+    Returns
+    -------
+    tuple[bool, int]:
+        `True` if the point is inside any particle, `False` otherwise. The index of
+        the particle that the point is inside, or -1 if the point is not inside any
+        particle.
+    """
+    for i in range(box.Nt):
+        if point_inside_particle(box, i, point, rtol):
+            return (True, i)
+    return (False, -1)
+
+
+@nb.njit(inline="always")
+def particle_inside_box(box: NBox, center: NDArray, radius: float) -> bool:
+    """
+    Check if a particle is fully inside the box, touching the wall permitted.
+
+    Note
+    ----
+    Only meaningful for non-periodic boxes; periodic boxes have no walls to
+    poke through and should wrap coordinates instead of calling this.
+
+    Parameters
+    ----------
+    box : NBox
+        Box object containing the particle ensemble.
+    center : NDArray
+        Candidate center coordinates for the particle.
+    radius : float
+        Radius of the particle.
+
+    Returns
+    -------
+    bool
+        `True` if the particle lies entirely within `[0, box.length]` (touching
+        the wall allowed), `False` if it pokes through any face.
+    """
+    return (
+        radius <= center[0] <= box.length - radius
+        and radius <= center[1] <= box.length - radius
+        and radius <= center[2] <= box.length - radius
+    )
+
+
+@nb.njit(fastmath=True)
+def compute_msd(box: NBox, centers0: NDArray) -> float:
+    """
+    Compute the mean-squared displacement (MSD) of particles relative to a set of
+    reference positions, accounting for periodic boundary conditions if enabled.
+
+    Note
+    ----
+    Uses the minimum image convention relative to a fixed reference (`centers0`), so
+    this is only meaningful while true displacements stay well under `box.length / 2`.
+    It is intended to detect departure from an initial lattice configuration (typical
+    scale ~ a few `r**2`), not to measure long-time diffusive behavior.
+
+    Parameters
+    ----------
+    box : NBox
+        Box object containing the current particle ensemble.
+    centers0 : NDArray
+        Reference particle center coordinates.
 
     Returns
     -------
     float
-        Clearance radius at `point`.
+        Mean-squared displacement averaged over all particles.
     """
     L = box.length
-    R = L
+    Nt = box.Nt
+    msd = 0.0
 
-    for i in range(box.Nt):
-        dx = point[0] - box.centers[i, 0]
-        dy = point[1] - box.centers[i, 1]
-        dz = point[2] - box.centers[i, 2]
+    for i in range(Nt):
+        dx = box.centers[i, 0] - centers0[i, 0]
+        dy = box.centers[i, 1] - centers0[i, 1]
+        dz = box.centers[i, 2] - centers0[i, 2]
 
         if box.periodic:
             dx, dy, dz = apply_mic(dx, dy, dz, L)
 
-        s = math.sqrt(dx**2 + dy**2 + dz**2) - box.radii[i]
-        if s < R:
-            R = s
+        msd += dx * dx + dy * dy + dz * dz
 
-    return R
+    return msd / Nt
+
+
+@nb.njit(fastmath=True)
+def radial_distribution(
+    box: NBox,
+    rmax: float,
+    nbins: int = 100,
+) -> tuple[NDArray, NDArray]:
+    """
+    Compute the radial distribution function g(r) of the particle ensemble.
+
+    g(r) measures the local particle density at distance `r` from a typical particle,
+    normalized by the density expected for a uniform random (ideal gas) distribution.
+    g(r) == 1 everywhere indicates no structure (a disordered fluid at low density);
+    sharp, narrow peaks at specific distances indicate crystalline order (e.g. a BCC
+    lattice has peaks at its characteristic nearest/next-nearest neighbor distances);
+    a liquid-like decaying oscillatory profile with a broad first peak is the expected
+    signature of an equilibrated hard-sphere fluid at finite volume fraction.
+
+    Note
+    ----
+    Uses direct O(N²) pairwise distances rather than the cell list, since this is
+    intended as an occasional post-hoc diagnostic (e.g. after `equilibrium_distribution`)
+    rather than something called every sweep. For periodic boxes, distances use the
+    minimum image convention, which is only valid for `rmax <= box.length / 2`; `rmax`
+    is silently clipped to this value if exceeded. For non-periodic boxes, no such
+    clipping is applied, but be aware that particles near the walls have systematically
+    fewer neighbors within `rmax` than particles in the bulk (a finite-size boundary
+    effect), which will bias g(r) low near larger `r` unless corrected for by the
+    caller.
+
+    Parameters
+    ----------
+    box : NBox
+        Box object containing the particle ensemble.
+    rmax : float | None
+        Maximum pair distance to consider. Clipped to `box.length / 2` for periodic
+        boxes (see Note).
+    nbins : int
+        Number of bins to divide `[0, rmax]` into.
+
+    Returns
+    -------
+    tuple[NDArray, NDArray]
+        `(r, g)` where `r` are the bin-center distances (length `nbins`) and `g` are
+        the corresponding g(r) values.
+    """
+    if nbins <= 0:
+        raise ValueError("nbins must be positive.")
+    if rmax <= 0.0:
+        raise ValueError("rmax must be positive.")
+
+    Nt = box.Nt
+    L = box.length
+
+    if box.periodic and rmax > 0.5 * L:
+        rmax = 0.5 * L
+
+    dr = rmax / nbins
+    hist = np.zeros(nbins, dtype=np.int64)
+
+    for i in range(Nt):
+        for j in range(i + 1, Nt):
+            dx = box.centers[i, 0] - box.centers[j, 0]
+            dy = box.centers[i, 1] - box.centers[j, 1]
+            dz = box.centers[i, 2] - box.centers[j, 2]
+
+            if box.periodic:
+                dx, dy, dz = apply_mic(dx, dy, dz, L)
+
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+
+            if dist < rmax:
+                b = int(dist / dr)
+                if b < nbins:
+                    hist[b] += 2  # count both (i, j) and (j, i) orderings
+
+    r = np.empty(nbins, dtype=np.float64)
+    g = np.zeros(nbins, dtype=np.float64)
+    density = Nt / L**3
+
+    for k in range(nbins):
+        r_lo = k * dr
+        r_hi = r_lo + dr
+        r[k] = 0.5 * (r_lo + r_hi)
+
+        shell_volume = 4.0 / 3.0 * pi * (r_hi**3 - r_lo**3)
+        ideal_count = density * shell_volume * Nt
+
+        if ideal_count > 0.0:
+            g[k] = hist[k] / ideal_count
+
+    return r, g
 
 
 @nb.njit(fastmath=True)
 def clearance_radius(box: NBox, point: NDArray) -> float:
-    r"""
-    Compute the radius of the largest sphere centered at `point`
-    that does not overlap any particle.
+    """
+    Compute the radius of the largest sphere centered at `point` that does not overlap
+    any particle.
 
     Parameters
     ----------
@@ -1107,6 +1371,49 @@ def clearance_radius(box: NBox, point: NDArray) -> float:
     return R
 
 
+@nb.njit(fastmath=True)
+def _clearance_radius(box: NBox, point: NDArray) -> float:  # pragma: no cover
+    """
+    Compute the radius of the largest sphere centered at `point` that does not
+    overlap any particle. Accounts for periodic boundary conditions if enabled in the box
+    configuration.
+
+    Note
+    ----
+    This is a naive O(N) implementation that checks all particles. It is kept for
+    reference and testing purposes. The `clearance_radius` method implements a more
+    efficient O(1) algorithm using a cell list.
+
+    Parameters
+    ----------
+    box : NBox
+        Box object containing the particle ensemble.
+    point : NDArray
+        Point coordinates.
+
+    Returns
+    -------
+    float
+        Clearance radius at `point`.
+    """
+    L = box.length
+    R = L
+
+    for i in range(box.Nt):
+        dx = point[0] - box.centers[i, 0]
+        dy = point[1] - box.centers[i, 1]
+        dz = point[2] - box.centers[i, 2]
+
+        if box.periodic:
+            dx, dy, dz = apply_mic(dx, dy, dz, L)
+
+        s = math.sqrt(dx**2 + dy**2 + dz**2) - box.radii[i]
+        if s < R:
+            R = s
+
+    return R
+
+
 @nb.njit(fastmath=True, inline="always")
 def random_point_sphere(center: NDArray, radius: float) -> NDArray:
     """
@@ -1147,7 +1454,7 @@ def simulate_multiple(
     periodic: bool = True,
     method: Literal["RSA", "BCC", "Equilibrium"] = "RSA",
 ) -> list[WalkResult]:
-    r"""
+    """
     Simulate multiple random walks in across multiple boxes.
 
     Multiple boxes are generated with the same target particle group parameters but
