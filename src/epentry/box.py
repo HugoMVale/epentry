@@ -14,7 +14,7 @@ __all__ = ["Box"]
 
 
 class Box:
-    r"""
+    """
     Ensemble of particles in a rectangular box.
 
     Parameters
@@ -25,7 +25,6 @@ class Box:
         Target volume fractions of each particle group.
     Nt : int
         Target total number of particles in the box.
-
 
     Examples
     --------
@@ -58,8 +57,10 @@ class Box:
             raise ValueError("All particle radii must be positive.")
         if np.any(vfs < 0.0) or np.any(vfs > 1.0):
             raise ValueError("All volume fractions must be in the range [0, 1].")
-        if vfs.sum() > 1.0:
-            raise ValueError(f"Sum of volume fractions ({vfs.sum()}) cannot exceed 1.")
+        if 0.0 == vfs.sum() > 1.0:
+            raise ValueError(
+                f"Sum of volume fractions ({vfs.sum()}) must be in the range (0, 1)."
+            )
         if not (isinstance(Nt, int) and Nt > 0):
             raise ValueError("Total number of particles must be a positive integer.")
 
@@ -87,7 +88,8 @@ class Box:
         method: Literal["RSA", "BCC", "Equilibrium"] = "RSA",
         periodic: bool = True,
     ) -> bool:
-        r"""Generate a non-overlapping particle ensemble using a given method.
+        """
+        Generate a non-overlapping particle ensemble using a given method.
 
         RSA: Particles are placed uniformly at random in a cubic simulation box. Candidate
         positions that overlap previously placed particles are rejected until a valid
@@ -97,7 +99,8 @@ class Box:
         Parameters
         ----------
         periodic : bool
-            Whether to apply periodic boundary conditions.
+            Whether to apply periodic boundary conditions. Only relevant for the RSA
+            method.
 
         Returns
         -------
@@ -173,14 +176,9 @@ class Box:
         rtol: float = 1e-3,
         maxsteps: int = 100,
     ) -> WalkResult:
-        r"""
+        """
         Simulate a random walk of a point particle in a box containing an ensemble of
         non-overlapping spheres.
-
-        Notes
-        -----
-        * There are "wall effects" because the random walker is not allowed to step
-        outside the box and we do not have periodic boundary conditions.
 
         Parameters
         ----------
