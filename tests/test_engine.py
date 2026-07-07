@@ -28,7 +28,13 @@ def test_RSA_feasible():
         assert len(box._nbox.centers) == Nt
         assert len(box._nbox.groups) == Nt
         assert len(box._nbox.radii) == Nt
-        assert not np.allclose(box._nbox.centers[0], box._nbox.centers[-1])
+        assert np.isclose(box._nbox.vfs().sum(), sum(vfs), rtol=1e-2)
+        for i in range(len(box._nbox.centers)):
+            for j in range(i + 1, len(box._nbox.centers)):
+                assert not engine.particles_overlap(box._nbox, i, j)
+        if not periodic:
+            for center, radius in zip(box._nbox.centers, box._nbox.radii):
+                assert engine.particle_inside_box(box._nbox, center, radius)
 
 
 def test_RSA_infeasible():
