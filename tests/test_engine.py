@@ -5,7 +5,7 @@ import epentry.engine as engine
 from epentry import Box
 
 
-def test_RSA_feasible():
+def test_Box_init():
     # Initialization
     rs = [1.0, 0.5, 0.25]
     vfs = [0.1, 0.01, 0.001]
@@ -19,6 +19,31 @@ def test_RSA_feasible():
     assert box._nbox.Nt == 0
     assert np.isclose(box._nbox.length, 0.0)
     assert not box._nbox.success
+    # Mismatched lengths
+    with pytest.raises(ValueError):
+        Box(rs=[1.0, 2.0], vfs=[0.1], Nt=100)
+    # Negative radius
+    with pytest.raises(ValueError):
+        Box(rs=[1.0, -2.0], vfs=[0.1, 0.2], Nt=100)
+    # Negative volume fraction
+    with pytest.raises(ValueError):
+        Box(rs=[1.0, 2.0], vfs=[-0.1, 0.2], Nt=100)
+    # Volume fraction greater than 1
+    with pytest.raises(ValueError):
+        Box(rs=[1.0, 2.0], vfs=[0.1, 1.2], Nt=100)
+    # Sum of volume fractions greater than 1
+    with pytest.raises(ValueError):
+        Box(rs=[1.0, 2.0], vfs=[0.6, 0.5], Nt=100)
+    # Non-positive total number of particles
+    with pytest.raises(ValueError):
+        Box(rs=[1.0, 2.0], vfs=[0.1, 0.2], Nt=0)
+
+
+def test_RSA_feasible():
+    rs = [1.0, 0.5, 0.25]
+    vfs = [0.1, 0.01, 0.001]
+    Nt = 1000
+    box = Box(rs, vfs, Nt)
     # RSA (all particles should be placed successfully)
     for periodic in [False, True]:
         success_rsa = box.place_particles(method="RSA", periodic=periodic)
@@ -29,9 +54,11 @@ def test_RSA_feasible():
         assert len(box._nbox.groups) == Nt
         assert len(box._nbox.radii) == Nt
         assert np.isclose(box._nbox.vfs().sum(), sum(vfs), rtol=1e-2)
-        for i in range(len(box._nbox.centers)):
-            for j in range(i + 1, len(box._nbox.centers)):
+        # no overlaps
+        for i in range(box._nbox.Nt):
+            for j in range(i + 1, box._nbox.Nt):
                 assert not engine.particles_overlap(box._nbox, i, j)
+        # all particles should be inside the box
         if not periodic:
             for center, radius in zip(box._nbox.centers, box._nbox.radii):
                 assert engine.particle_inside_box(box._nbox, center, radius)
@@ -48,6 +75,10 @@ def test_RSA_infeasible():
         assert len(box._nbox.centers) == box._nbox.Nt
         assert len(box._nbox.groups) == box._nbox.Nt
         assert len(box._nbox.radii) == box._nbox.Nt
+        # no overlaps
+        for i in range(box._nbox.Nt):
+            for j in range(i + 1, box._nbox.Nt):
+                assert not engine.particles_overlap(box._nbox, i, j)
 
 
 def test_BCC_feasible():
@@ -61,6 +92,10 @@ def test_BCC_feasible():
     assert len(box._nbox.groups) == box._nbox.Nt
     assert len(box._nbox.radii) == box._nbox.Nt
     assert np.allclose(box._nbox.vfs(), [vf])
+    # no overlaps
+    for i in range(box._nbox.Nt):
+        for j in range(i + 1, box._nbox.Nt):
+            assert not engine.particles_overlap(box._nbox, i, j)
 
 
 def test_BCC_infeasible():

@@ -10,6 +10,11 @@ __all__ = [
     "METHODS",
     "WalkResult",
     "NBox",
+    "rsa",
+    "sc",
+    "bcc",
+    "fcc",
+    "equilibrium_distribution",
     "simulate_multiple",
 ]
 
@@ -17,11 +22,15 @@ __all__ = [
 METHOD_RSA = 0
 METHOD_BCC = 1
 METHOD_EQUIL = 2
+METHOD_SC = 3
+METHOD_FCC = 4
 
 METHODS = {
     METHOD_RSA: "Random Sequential Addition",
     METHOD_BCC: "Body-Centered Cubic",
     METHOD_EQUIL: "Equilibrated Hard Spheres",
+    METHOD_SC: "Simple Cubic",
+    METHOD_FCC: "Face-Centered Cubic",
 }
 
 
@@ -313,14 +322,103 @@ def rsa(
 
 
 @nb.njit(fastmath=True)
-def bcc(box: NBox, cell_list: bool = True) -> bool:
+def build_lattice(
+    box: NBox,
+    motif: NDArray,
+    vf_max: float,
+    method_id: int,
+    cell_list: bool,
+) -> bool:
     """
-    Generate a body-centered cubic (BCC) particle arrangement.
+    Shared core for regular lattice generation.
 
-    Particles are placed on a perfect BCC lattice fitted into a cubic simulation
-    box whose side length is derived from the target number density. As many complete
-    unit cells as fit along each axis are used; the actual particle count may differ
-    slightly from the target.
+    Places `motif` (fractional coordinates within a cubic unit cell, shape (m, 3)) on a
+    simple-cubic superlattice of side `a`, replicated nc³ times along each axis. The unit
+    cell side `a` is derived from the target number density so that the requested volume
+    fraction is achieved; `nc` is chosen to best match the target particle count.
+
+    Parameters
+    ----------
+    box : NBox
+        Box object. Updated in-place with the particle ensemble.
+    motif : NDArray
+        Fractional basis coordinates (in units of `a`) for one unit cell, shape (m, 3).
+    vf_max : float
+        Maximum achievable volume fraction for this lattice (close packing limit).
+    method_id : int
+        Value to assign to `box.method` identifying the lattice type.
+    cell_list : bool
+        Whether to build a cell list after placement.
+
+    Returns
+    -------
+    bool
+        `True` if all particles were successfully placed without overlap, `False`
+        otherwise.
+    """
+    if box.rs.size > 1:
+        raise ValueError("Only a single particle group is supported in this mode.")
+
+    vf = box.vfs_target[0]
+    if vf > vf_max:
+        raise ValueError(
+            "The target volume fraction exceeds the maximum for this lattice."
+        )
+
+    # Number density and box length
+    m = motif.shape[0]
+    r = box.rs[0]
+    nt = vf / (4.0 / 3.0 * pi * r**3)
+    a = (m / nt) ** (1.0 / 3.0)
+    nc = max(1, int(np.round((box.Nt_target / m) ** (1.0 / 3.0))))
+    box.length = nc * a
+    Nt = m * nc**3
+
+    # Set box metadata
+    box.method = method_id
+    box.periodic = True
+
+    # Allocate particle arrays
+    box.radii = np.full(Nt, r, dtype=np.float64)
+    box.centers = np.zeros((Nt, 3), dtype=np.float64)
+    box.groups = np.zeros(Nt, dtype=np.int64)
+
+    # Place particles on lattice sites
+    k = 0
+    for ix in range(nc):
+        for iy in range(nc):
+            for iz in range(nc):
+                origin_x = ix * a
+                origin_y = iy * a
+                origin_z = iz * a
+                for j in range(m):
+                    box.centers[k, 0] = origin_x + motif[j, 0] * a
+                    box.centers[k, 1] = origin_y + motif[j, 1] * a
+                    box.centers[k, 2] = origin_z + motif[j, 2] * a
+                    k += 1
+
+    # Finalize
+    box.success = True  # Regular lattices always succeed if inputs are valid
+    box.Ns = np.array([Nt], dtype=np.int64)
+    box.Nt = Nt
+
+    if cell_list:
+        build_cell_list(box)
+
+    return box.success
+
+
+@nb.njit(fastmath=True)
+def sc(box: NBox, cell_list: bool = True) -> bool:
+    """
+    Generate a simple cubic (SC) particle arrangement.
+
+    One particle per unit cell, placed at the corner.
+
+    Particles are placed on a perfect SC lattice fitted into a cubic simulation box
+    whose side length is derived from the target number density. As many complete unit
+    cells as fit along each axis are used; the actual particle count may differ slightly
+    from the target.
 
     Parameters
     ----------
@@ -335,58 +433,87 @@ def bcc(box: NBox, cell_list: bool = True) -> bool:
         `True` if all particles were successfully placed without overlap, `False`
         otherwise.
     """
-    if box.rs.size > 1:
-        raise ValueError("Only a single particle group is supported in BCC mode.")
+    # One motif position per unit cell (in units of 'a'):
+    #   corner: (0, 0, 0)
+    motif = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
+    vf_max = pi / 6.0
+    return build_lattice(box, motif, vf_max, METHOD_SC, cell_list)
 
-    vf = box.vfs_target[0]
-    if vf > math.sqrt(3) * pi / 8:
-        raise ValueError("The target volume fraction exceeds the maximum for BCC (0.68).")
 
-    # Number density and box length
-    r = box.rs[0]
-    nt = vf / (4.0 / 3.0 * pi * r**3)
-    a = (2.0 / nt) ** (1.0 / 3.0)
-    nc = max(1, int(np.round((box.Nt_target / 2.0) ** (1.0 / 3.0))))
-    box.length = nc * a
-    Nt = 2 * nc**3
+@nb.njit(fastmath=True)
+def bcc(box: NBox, cell_list: bool = True) -> bool:
+    """
+    Generate a body-centered cubic (BCC) particle arrangement.
 
-    # Set box metadata
-    box.method = METHOD_BCC
-    box.periodic = True
+    Two particles per unit cell: corner and body center.
 
-    # Allocate particle arrays
-    box.radii = np.full(Nt, r, dtype=np.float64)
-    box.centers = np.zeros((Nt, 3), dtype=np.float64)
-    box.groups = np.zeros(Nt, dtype=np.int64)
+    Particles are placed on a perfect BCC lattice fitted into a cubic simulation box
+    whose side length is derived from the target number density. As many complete unit
+    cells as fit along each axis are used; the actual particle count may differ slightly
+    from the target.
 
-    # Place particles on BCC sites
+    Parameters
+    ----------
+    box : NBox
+        Box object. Updated in-place with the particle ensemble.
+    cell_list : bool
+        Whether to build a cell list after placement.
+
+    Returns
+    -------
+    bool
+        `True` if all particles were successfully placed without overlap, `False`
+        otherwise.
+    """
     # Two motif positions per unit cell (in units of 'a'):
     #   corner:      (0,   0,   0  )
     #   body-centre: (0.5, 0.5, 0.5)
     motif = np.array([[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]], dtype=np.float64)
+    vf_max = math.sqrt(3) * pi / 8.0
+    return build_lattice(box, motif, vf_max, METHOD_BCC, cell_list)
 
-    k = 0
-    for ix in range(nc):
-        for iy in range(nc):
-            for iz in range(nc):
-                origin_x = ix * a
-                origin_y = iy * a
-                origin_z = iz * a
-                for m in range(2):
-                    box.centers[k, 0] = origin_x + motif[m, 0] * a
-                    box.centers[k, 1] = origin_y + motif[m, 1] * a
-                    box.centers[k, 2] = origin_z + motif[m, 2] * a
-                    k += 1
 
-    # Finalize
-    box.success = True  # Bcc always succeeds if inputs are valid
-    box.Ns = np.array([Nt], dtype=np.int64)
-    box.Nt = Nt
+@nb.njit(fastmath=True)
+def fcc(box: NBox, cell_list: bool = True) -> bool:
+    """
+    Generate a face-centered cubic (FCC) particle arrangement.
 
-    if cell_list:
-        build_cell_list(box)
+    Four particles per unit cell: corner and face centers.
 
-    return box.success
+    Particles are placed on a perfect FCC lattice fitted into a cubic simulation box
+    whose side length is derived from the target number density. As many complete unit
+    cells as fit along each axis are used; the actual particle count may differ slightly
+    from the target.
+
+    Parameters
+    ----------
+    box : NBox
+        Box object. Updated in-place with the particle ensemble.
+    cell_list : bool
+        Whether to build a cell list after placement.
+
+    Returns
+    -------
+    bool
+        `True` if all particles were successfully placed without overlap, `False`
+        otherwise.
+    """
+    # Four motif positions per unit cell (in units of 'a'):
+    #   corner:       (0,   0,   0  )
+    #   face (xy):    (0.5, 0.5, 0  )
+    #   face (xz):    (0.5, 0,   0.5)
+    #   face (yz):    (0,   0.5, 0.5)
+    motif = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [0.5, 0.5, 0.0],
+            [0.5, 0.0, 0.5],
+            [0.0, 0.5, 0.5],
+        ],
+        dtype=np.float64,
+    )
+    vf_max = pi / (3.0 * math.sqrt(2.0))
+    return build_lattice(box, motif, vf_max, METHOD_FCC, cell_list)
 
 
 @nb.njit(fastmath=True)

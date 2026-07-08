@@ -57,7 +57,7 @@ class Box:
             raise ValueError("All particle radii must be positive.")
         if np.any(vfs < 0.0) or np.any(vfs > 1.0):
             raise ValueError("All volume fractions must be in the range [0, 1].")
-        if 0.0 == vfs.sum() > 1.0:
+        if vfs.sum() == 0.0 or vfs.sum() > 1.0:
             raise ValueError(
                 f"Sum of volume fractions ({vfs.sum()}) must be in the range (0, 1)."
             )
@@ -85,7 +85,7 @@ class Box:
 
     def place_particles(
         self,
-        method: Literal["RSA", "BCC", "Equilibrium"] = "RSA",
+        method: Literal["RSA", "SC", "BCC", "FCC", "Equilibrium"] = "RSA",
         periodic: bool = True,
     ) -> bool:
         """
@@ -95,6 +95,22 @@ class Box:
         positions that overlap previously placed particles are rejected until a valid
         position is found. Failure to place all particles is likely at a high total volume
         fraction
+
+        SC: Particles are placed on a simple cubic lattice. The lattice spacing is chosen
+        to achieve the target volume fraction. This method is only valid for a single
+        particle group.
+
+        BCC: Particles are placed on a body-centered cubic lattice. The lattice spacing is
+        chosen to achieve the target volume fraction. This method is only valid for a
+        single particle group.
+
+        FCC: Particles are placed on a face-centered cubic lattice. The lattice spacing is
+        chosen to achieve the target volume fraction. This method is only valid for a
+        single particle group.
+
+        Equilibrium: Particles are placed in a BCC lattice and then allowed to relax to
+        an equilibrium configuration using a Monte Carlo simulation. This method is only
+        valid for a single particle group.
 
         Parameters
         ----------
@@ -111,13 +127,17 @@ class Box:
         """
         if method == "RSA":
             return engine.rsa(self._nbox, periodic)
+        elif method == "SC":
+            return engine.sc(self._nbox)
         elif method == "BCC":
             return engine.bcc(self._nbox)
+        elif method == "FCC":
+            return engine.fcc(self._nbox)
         elif method == "Equilibrium":
             return engine.equilibrium_distribution(self._nbox)
         else:
             raise ValueError(
-                f"Invalid method '{method}'. Must be 'RSA', 'BCC', or 'Equilibrium'."
+                f"Invalid method '{method}'. Must be 'RSA', 'SC', 'BCC', 'FCC' or 'Equilibrium'."  # noqa: E501
             )
 
     def plot(
