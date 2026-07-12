@@ -57,7 +57,7 @@ def test_RSA_feasible():
         # no overlaps
         for i in range(box._nbox.Nt):
             for j in range(i + 1, box._nbox.Nt):
-                assert not engine.particles_overlap(box._nbox, i, j)
+                assert not engine.particle_pair_overlap(box._nbox, i, j)
         # all particles should be inside the box
         if not periodic:
             for center, radius in zip(box._nbox.centers, box._nbox.radii):
@@ -78,7 +78,7 @@ def test_RSA_infeasible():
         # no overlaps
         for i in range(box._nbox.Nt):
             for j in range(i + 1, box._nbox.Nt):
-                assert not engine.particles_overlap(box._nbox, i, j)
+                assert not engine.particle_pair_overlap(box._nbox, i, j)
 
 
 def test_BCC_feasible():
@@ -95,7 +95,7 @@ def test_BCC_feasible():
     # no overlaps
     for i in range(box._nbox.Nt):
         for j in range(i + 1, box._nbox.Nt):
-            assert not engine.particles_overlap(box._nbox, i, j)
+            assert not engine.particle_pair_overlap(box._nbox, i, j)
 
 
 def test_BCC_infeasible():
@@ -109,7 +109,7 @@ def test_BCC_infeasible():
 def test_cell_build_RSA():
     box = engine.NBox(np.array([1.0]), np.array([0.3]), 1000)
     for periodic in [False, True]:
-        engine.rsa(box, periodic)
+        engine.generate_rsa(box, periodic)
         X = np.random.uniform(0, box.length, size=(1000, 3))
         once_inside = False
         once_outside = False
@@ -121,8 +121,8 @@ def test_cell_build_RSA():
             if inside1:
                 once_inside = True
             if not inside1:
-                R1 = engine.clearance_radius(box, x)
-                R2 = engine._clearance_radius(box, x)
+                R1 = engine.local_clearance_radius(box, x)
+                R2 = engine._local_clearance_radius(box, x)
                 assert np.isclose(R1, R2)
                 once_outside = True
         assert once_inside
@@ -135,7 +135,7 @@ def test_Equilibrium():
     nbox = box._nbox
     for i in range(len(nbox.centers)):
         for j in range(i + 1, len(nbox.centers)):
-            assert not engine.particles_overlap(nbox, i, j)
+            assert not engine.particle_pair_overlap(nbox, i, j)
 
 
 def test_simulate_walk():

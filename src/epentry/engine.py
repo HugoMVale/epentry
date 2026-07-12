@@ -10,11 +10,11 @@ __all__ = [
     "METHODS",
     "WalkResult",
     "NBox",
-    "rsa",
-    "sc",
-    "bcc",
-    "fcc",
-    "equilibrium_distribution",
+    "generate_rsa",
+    "generate_sc",
+    "generate_bcc",
+    "generate_fcc",
+    "equilibrate_bcc",
     "simulate_multiple",
 ]
 
@@ -213,7 +213,7 @@ class NBox:
 
 
 @nb.njit(fastmath=True)
-def rsa(
+def generate_rsa(
     box: NBox,
     periodic: bool = True,
     cell_list: bool = True,
@@ -294,7 +294,7 @@ def rsa(
             attempts += 1
             overlap = False
             for j in range(k):
-                overlap = particles_overlap(box, k, j)
+                overlap = particle_pair_overlap(box, k, j)
                 if overlap:
                     break
             if not overlap:
@@ -326,7 +326,7 @@ def rsa(
 
 
 @nb.njit(fastmath=True)
-def build_lattice(
+def generate_lattice(
     box: NBox,
     motif: NDArray,
     vf_max: float,
@@ -414,7 +414,7 @@ def build_lattice(
 
 
 @nb.njit(fastmath=True)
-def sc(box: NBox, cell_list: bool = True) -> bool:
+def generate_sc(box: NBox, cell_list: bool = True) -> bool:
     """
     Generate a simple cubic (SC) particle arrangement.
 
@@ -442,11 +442,11 @@ def sc(box: NBox, cell_list: bool = True) -> bool:
     #   corner: (0, 0, 0)
     motif = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
     vf_max = pi / 6.0
-    return build_lattice(box, motif, vf_max, METHOD_SC, cell_list)
+    return generate_lattice(box, motif, vf_max, METHOD_SC, cell_list)
 
 
 @nb.njit(fastmath=True)
-def bcc(box: NBox, cell_list: bool = True) -> bool:
+def generate_bcc(box: NBox, cell_list: bool = True) -> bool:
     """
     Generate a body-centered cubic (BCC) particle arrangement.
 
@@ -475,11 +475,11 @@ def bcc(box: NBox, cell_list: bool = True) -> bool:
     #   body-centre: (0.5, 0.5, 0.5)
     motif = np.array([[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]], dtype=np.float64)
     vf_max = math.sqrt(3) * pi / 8.0
-    return build_lattice(box, motif, vf_max, METHOD_BCC, cell_list)
+    return generate_lattice(box, motif, vf_max, METHOD_BCC, cell_list)
 
 
 @nb.njit(fastmath=True)
-def fcc(box: NBox, cell_list: bool = True) -> bool:
+def generate_fcc(box: NBox, cell_list: bool = True) -> bool:
     """
     Generate a face-centered cubic (FCC) particle arrangement.
 
@@ -518,17 +518,17 @@ def fcc(box: NBox, cell_list: bool = True) -> bool:
         dtype=np.float64,
     )
     vf_max = pi / (3.0 * math.sqrt(2.0))
-    return build_lattice(box, motif, vf_max, METHOD_FCC, cell_list)
+    return generate_lattice(box, motif, vf_max, METHOD_FCC, cell_list)
 
 
 @nb.njit(fastmath=True)
-def equilibrium_distribution(
+def equilibrate_bcc(
     box: NBox,
     n_sweeps: int = 200,
     target_accept: float = 0.35,
 ) -> bool:
     """
-    Generate an equilibrated ensemble of hard spheres.
+    Generate an equilibrated ensemble of particles.
 
     A BCC lattice is first generated, and then an adaptive Monte Carlo procedure is
     used to equilibrate the particle ensemble. The maximum displacement for each particle
@@ -554,7 +554,7 @@ def equilibrium_distribution(
         `True` if the equilibration was successful, `False` otherwise.
     """
     # Generate BCC lattice
-    bcc(box, cell_list=True)
+    generate_bcc(box, cell_list=True)
 
     # Compute initial gap between nearest neighbors
     r = box.radii[0]
@@ -739,20 +739,20 @@ def simulate_walk(
 
     for step in range(1, maxsteps + 1):
         # Find radius of largest sphere centered about X
-        R = clearance_radius(box, X)
+        R = local_clearance_radius(box, X)
         if R <= box.rmin * rtol / 10:
             stuck = True
             break  # If the clearance radius is too small, terminate the walk
 
         # Move to random point on the sphere of radius R centered about X
         if box.periodic:
-            Xtry[:] = random_point_sphere(X, R)
+            Xtry[:] = random_point_on_sphere(X, R)
             X[0] = wrap(Xtry[0], L)
             X[1] = wrap(Xtry[1], L)
             X[2] = wrap(Xtry[2], L)
         else:
             while True:
-                Xtry[:] = random_point_sphere(X, R)
+                Xtry[:] = random_point_on_sphere(X, R)
                 if point_inside_box(box, Xtry):
                     break
             X[:] = Xtry
@@ -1064,7 +1064,7 @@ def trial_overlaps_any_particle(box: NBox, i: int, tcenter: NDArray) -> tuple[bo
 
 
 @nb.njit(inline="always")
-def particles_overlap(box: NBox, i: int, j: int) -> bool:
+def particle_pair_overlap(box: NBox, i: int, j: int) -> bool:
     """
     Check if two particles overlap, accounting for periodic boundary conditions
     if enabled in the box configuration.
@@ -1279,7 +1279,7 @@ def particle_inside_box(box: NBox, center: NDArray, radius: float) -> bool:
 
 
 @nb.njit(fastmath=True)
-def compute_msd(box: NBox, centers0: NDArray) -> float:
+def mean_squared_displacement(box: NBox, centers0: NDArray) -> float:
     """
     Compute the mean-squared displacement (MSD) of particles relative to a set of
     reference positions, accounting for periodic boundary conditions if enabled.
@@ -1414,7 +1414,7 @@ def radial_distribution(
 
 
 @nb.njit(fastmath=True)
-def clearance_radius(box: NBox, point: NDArray) -> float:
+def local_clearance_radius(box: NBox, point: NDArray) -> float:
     """
     Compute the radius of the largest sphere centered at `point` that does not overlap
     any particle.
@@ -1501,7 +1501,7 @@ def clearance_radius(box: NBox, point: NDArray) -> float:
 
 
 @nb.njit(fastmath=True)
-def _clearance_radius(box: NBox, point: NDArray) -> float:  # pragma: no cover
+def _local_clearance_radius(box: NBox, point: NDArray) -> float:  # pragma: no cover
     """
     Compute the radius of the largest sphere centered at `point` that does not
     overlap any particle. Accounts for periodic boundary conditions if enabled in the box
@@ -1544,7 +1544,7 @@ def _clearance_radius(box: NBox, point: NDArray) -> float:  # pragma: no cover
 
 
 @nb.njit(fastmath=True, inline="always")
-def random_point_sphere(center: NDArray, radius: float) -> NDArray:
+def random_point_on_sphere(center: NDArray, radius: float) -> NDArray:
     """
     Generate a random point on the surface of a sphere.
 
@@ -1625,7 +1625,7 @@ def simulate_multiple(
             # RSA can fail at high volume fractions, so we try multiple times
             success = False
             for _ in range(10):
-                success = rsa(box, periodic=periodic, cell_list=False)
+                success = generate_rsa(box, periodic=periodic, cell_list=False)
                 if success:
                     build_cell_list(box)
                     break
@@ -1633,9 +1633,9 @@ def simulate_multiple(
                 print("  Failed to fill box after 10 attempts. Skipping.")
                 continue
         elif method == "BCC":
-            bcc(box, cell_list=True)
+            generate_bcc(box, cell_list=True)
         elif method == "Equilibrium":
-            equilibrium_distribution(box)
+            equilibrate_bcc(box)
         else:
             raise ValueError(f"Unknown method: {method}")
 

@@ -126,15 +126,15 @@ class Box:
 
         """
         if method == "RSA":
-            return engine.rsa(self._nbox, periodic)
+            return engine.generate_rsa(self._nbox, periodic)
         elif method == "SC":
-            return engine.sc(self._nbox)
+            return engine.generate_sc(self._nbox)
         elif method == "BCC":
-            return engine.bcc(self._nbox)
+            return engine.generate_bcc(self._nbox)
         elif method == "FCC":
-            return engine.fcc(self._nbox)
+            return engine.generate_fcc(self._nbox)
         elif method == "Equilibrium":
-            return engine.equilibrium_distribution(self._nbox)
+            return engine.equilibrate_bcc(self._nbox)
         else:
             raise ValueError(
                 f"Invalid method '{method}'. Must be 'RSA', 'SC', 'BCC', 'FCC', or 'Equilibrium'."  # noqa: E501
