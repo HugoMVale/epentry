@@ -84,7 +84,7 @@ class WalkResult:
 @nb.experimental.jitclass
 class NBox:
     """
-    Ensemble of particles in a rectangular box.
+    Ensemble of particles in a cubic box.
 
     Parameters
     ----------
@@ -107,6 +107,8 @@ class NBox:
         Particle group identifiers.
     head : NDArray
         Head of the linked list for each cell in the cell list.
+    lattice_a : float
+        Lattice constant for regular lattice generation.
     length : float
         Simulation box length.
     nc : int
@@ -157,6 +159,7 @@ class NBox:
     cell_size: nb.float64
     nc: nb.int64
     periodic: bool
+    lattice_a: nb.float64
 
     def __init__(
         self,
@@ -175,7 +178,7 @@ class NBox:
         self.rmin = np.min(self.rs)
         self.rmax = np.max(self.rs)
 
-        # Initialize actual values to zero until particles are placed
+        # Initialize actual values to zero/empty until particles are placed
         self.Ns = np.zeros(len(self.rs), dtype=np.int64)
         self.Nt = 0
         self.method = -1
@@ -187,6 +190,7 @@ class NBox:
         self.success = False
         self.cell_size = 0.0
         self.nc = 0
+        self.lattice_a = 0.0
         self.head = np.empty(0, np.int64)
         self.next = np.empty(0, np.int64)
         self.prev = np.empty(0, np.int64)
@@ -330,11 +334,11 @@ def build_lattice(
     cell_list: bool,
 ) -> bool:
     """
-    Shared core for regular lattice generation.
+    Shared algorithm for regular lattice generation.
 
     Places `motif` (fractional coordinates within a cubic unit cell, shape (m, 3)) on a
-    simple-cubic superlattice of side `a`, replicated nc³ times along each axis. The unit
-    cell side `a` is derived from the target number density so that the requested volume
+    simple-cubic lattice of side `a`, replicated nc³ times along each axis. The unit cell
+    side `a` is derived from the target number density so that the requested volume
     fraction is achieved; `nc` is chosen to best match the target particle count.
 
     Parameters
@@ -371,10 +375,11 @@ def build_lattice(
     nt = vf / (4.0 / 3.0 * pi * r**3)
     a = (m / nt) ** (1.0 / 3.0)
     nc = max(1, int(np.round((box.Nt_target / m) ** (1.0 / 3.0))))
-    box.length = nc * a
     Nt = m * nc**3
 
-    # Set box metadata
+    # Set box attributes
+    box.lattice_a = a
+    box.length = nc * a
     box.method = method_id
     box.periodic = True
 
@@ -554,10 +559,7 @@ def equilibrium_distribution(
     # Compute initial gap between nearest neighbors
     r = box.radii[0]
     Nt = box.Nt
-    L = box.length
-    # TBD: we should get nc it from the lattice
-    nc = max(1, int(np.round((Nt / 2.0) ** (1.0 / 3.0))))
-    a = L / nc
+    a = box.lattice_a
     gap = math.sqrt(3) / 2 * a - 2.0 * r
 
     # Adaptive Monte Carlo equilibration
