@@ -15,7 +15,7 @@ __all__ = ["Box"]
 
 class Box:
     """
-    Ensemble of particles in a rectangular box.
+    Ensemble of particles in a cubic box.
 
     Parameters
     ----------
@@ -48,10 +48,10 @@ class Box:
         vfs = np.asarray(vfs, dtype=np.float64)
 
         if rs.ndim != 1 or vfs.ndim != 1:
-            raise ValueError("rs and vfs must be 1D arrays.")
+            raise ValueError("`rs` and `vfs` must be 1D arrays.")
         if len(rs) != len(vfs):
             raise ValueError(
-                f"Length of rs ({len(rs)}) must match length of vfs ({len(vfs)})."
+                f"Length of `rs` ({len(rs)}) must match length of `vfs` ({len(vfs)})."
             )
         if np.any(rs <= 0.0):
             raise ValueError("All particle radii must be positive.")
@@ -137,7 +137,7 @@ class Box:
             return engine.equilibrium_distribution(self._nbox)
         else:
             raise ValueError(
-                f"Invalid method '{method}'. Must be 'RSA', 'SC', 'BCC', 'FCC' or 'Equilibrium'."  # noqa: E501
+                f"Invalid method '{method}'. Must be 'RSA', 'SC', 'BCC', 'FCC', or 'Equilibrium'."  # noqa: E501
             )
 
     def plot(
@@ -152,8 +152,8 @@ class Box:
         """
         Plot a 3D visualization of the particles and the random walk.
 
-        Each particle is rendered as a sphere and colored according to its
-        group index. If present, the trajectory is overlaid as a 3D line.
+        Each particle is rendered as a sphere and colored according to its group index.
+        If present, the trajectory is overlaid as a 3D line.
 
         Parameters
         ----------
