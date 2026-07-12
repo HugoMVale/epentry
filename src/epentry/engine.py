@@ -747,9 +747,9 @@ def simulate_walk(
         # Move to random point on the sphere of radius R centered about X
         if box.periodic:
             Xtry[:] = random_point_sphere(X, R)
-            X[0] = Xtry[0] % L
-            X[1] = Xtry[1] % L
-            X[2] = Xtry[2] % L
+            X[0] = wrap(Xtry[0], L)
+            X[1] = wrap(Xtry[1], L)
+            X[2] = wrap(Xtry[2], L)
         else:
             while True:
                 Xtry[:] = random_point_sphere(X, R)
