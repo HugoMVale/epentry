@@ -24,8 +24,8 @@ def plot_with_matplotlib(
     """
     Plot a 3D visualization of the particles and the random walk using `matplotlib`.
 
-    Each particle is rendered as a sphere and colored according to its
-    group index. If present, the trajectory is overlaid as a 3D line.
+    Each particle is rendered as a sphere and colored according to its group index. If
+    present, the trajectory is overlaid as a 3D line.
 
     There is no support for periodic boundary conditions in this backend. Ghost particles
     are not generated and the trajectory is not wrapped.
@@ -155,8 +155,8 @@ def plot_with_pyvista(
     """
     Plot a 3D visualization of the particles and the random walk using `pyvista`.
 
-    Each particle is rendered as a sphere and colored according to its
-    group index. If present, the trajectory is overlaid as a 3D line.
+    Each particle is rendered as a sphere and colored according to its group index. If
+    present, the trajectory is overlaid as a 3D line.
 
     Parameters
     ----------
