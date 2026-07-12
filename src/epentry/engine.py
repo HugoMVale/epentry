@@ -24,6 +24,7 @@ METHOD_BCC = 1
 METHOD_EQUIL = 2
 METHOD_SC = 3
 METHOD_FCC = 4
+METHOD_FBR = 5
 
 METHODS = {
     METHOD_RSA: "Random Sequential Addition",
@@ -31,6 +32,7 @@ METHODS = {
     METHOD_EQUIL: "Equilibrated Hard Spheres",
     METHOD_SC: "Simple Cubic",
     METHOD_FCC: "Face-Centered Cubic",
+    METHOD_FBR: "Force-Biased Relaxation",
 }
 
 
@@ -635,6 +637,245 @@ def montecarlo_sweep(box: NBox, delta: float) -> int:
 
 
 @nb.njit(fastmath=True)
+def generate_dense_ensemble(
+    box: NBox,
+    periodic: bool = True,
+    cell_list: bool = True,
+    step_initial: float = 0.05,
+    step_max: float = 0.10,
+    step_min: float = 1e-4,
+) -> bool:
+    """
+    Generate a dense disordered hard-sphere ensemble by particle growth and
+    geometric overlap projection.
+
+    Particles are first initialized as points uniformly distributed throughout
+    the simulation box. Their radii are then increased adaptively towards the
+    target radii. After each growth increment, overlaps are removed by repeated
+    geometric projection.
+
+    Growth is adaptive:
+        * easy relaxations -> larger growth steps
+        * difficult relaxations -> retry with smaller growth steps
+
+    Parameters
+    ----------
+    box
+        Simulation box.
+    periodic
+        Whether periodic boundaries are used.
+    cell_list
+        Build a cell list after successful generation.
+    step_initial
+        Initial radius scaling increment.
+    step_max
+        Largest permitted growth increment.
+    step_min
+        Smallest permitted growth increment before declaring jamming.
+
+    Returns
+    -------
+    bool
+        True if the target radii were reached without overlap.
+    """
+    # Target particle group values
+    rs = box.rs
+    vfs = box.vfs_target
+    Nt_target = box.Nt_target
+
+    # Number density of each particle group and total
+    ns = vfs / (4.0 / 3.0 * pi * rs**3)
+    nt = ns.sum()
+
+    # Particle counts of each group
+    Ns = np.rint(Nt_target * ns / nt).astype(np.int64)
+    Nt = Ns.sum()
+
+    # Box length
+    box.length = (Nt / nt) ** (1.0 / 3.0)
+
+    # Set box metadata
+    box.method = METHOD_FBR
+    box.periodic = periodic
+
+    # Allocate arrays
+    box.radii = np.repeat(rs, Ns)
+    box.groups = np.repeat(np.arange(rs.size), Ns)
+
+    # Random point initialization
+    box.centers = np.random.uniform(0.0, box.length, (Nt, 3))
+
+    box.Ns = Ns
+    box.Nt = Nt
+
+    # Adaptive particle growth
+    radius_scale = 0.0
+    step = step_initial
+
+    box.success = False
+
+    while radius_scale < 1.0:
+        target_scale = radius_scale + step
+        if target_scale > 1.0:
+            target_scale = 1.0
+
+        current_radii = box.radii * target_scale
+
+        # Relax overlaps
+        success = relax_overlaps(box, current_radii, maxiter=1000)
+
+        if success:
+            # Accept growth step
+            radius_scale = target_scale
+            # Slightly accelerate growth
+            step = min(1.2 * step, step_max)
+        else:
+            # Retry with smaller increment
+            step *= 0.5
+
+            if step < step_min:
+                print(
+                    "Failed to reach target particle size before minimum growth increment was reached."  # noqa: E501
+                )
+                box.success = False
+                return False
+
+    # Final radii
+    box.radii = rs[box.groups].copy()
+    box.success = True
+
+    if cell_list:
+        build_cell_list(box)
+
+    return True
+
+
+@nb.njit(fastmath=True)
+def relax_overlaps(
+    box: NBox,
+    current_radii: NDArray,
+    maxiter: int = 1000,
+    rtol: float = 1e-4,
+    displacement_fraction_max: float = 0.2,
+) -> bool:
+    """
+    Resolve particle overlaps by repeated geometric projection.
+
+    Each overlapping pair contributes the minimum translation required to eliminate the
+    overlap. Corrections from all neighbours are accumulated and applied simultaneously.
+
+    Note
+    ----
+    This implementation is O(maxiter * N²). To be improved with a cell list for neighbour
+    searches.
+
+    Parameters
+    ----------
+    box
+        Particle ensemble.
+    current_radii
+        Radii during the current growth stage.
+    maxiter
+        Maximum projection iterations.
+    rtol
+        Relative convergence tolerance.
+    displacement_fraction_max
+        Maximum displacement per iteration as a fraction of the smallest particle radius.
+    """
+    Nt = box.Nt
+    L = box.length
+    rmin = np.min(current_radii)
+    overlap_tol = rtol * rmin
+    displacement_max = displacement_fraction_max * rmin
+
+    displacements = np.zeros((Nt, 3), dtype=np.float64)
+
+    for _ in range(maxiter):
+        displacements.fill(0.0)
+        overlap_max = 0.0
+
+        # Accumulate pair corrections
+        for i in range(Nt):
+            for j in range(i + 1, Nt):
+                dx = box.centers[j, 0] - box.centers[i, 0]
+                dy = box.centers[j, 1] - box.centers[i, 1]
+                dz = box.centers[j, 2] - box.centers[i, 2]
+
+                if box.periodic:
+                    dx, dy, dz = apply_mic(dx, dy, dz, L)
+
+                dist2 = dx**2 + dy**2 + dz**2
+                target = current_radii[i] + current_radii[j]
+
+                if dist2 >= target**2:
+                    continue
+
+                # Coincident centres
+                if dist2 < 1e-30:
+                    nx, ny, nz = random_unit_vector()
+                    overlap = target
+                else:
+                    dist = math.sqrt(dist2)
+                    nx = dx / dist
+                    ny = dy / dist
+                    nz = dz / dist
+                    overlap = target - dist
+
+                if overlap > overlap_max:
+                    overlap_max = overlap
+
+                r_i = current_radii[i]
+                r_j = current_radii[j]
+                correction_i = overlap * r_j / (r_i + r_j)
+                correction_j = overlap * r_i / (r_i + r_j)
+
+                displacements[i, 0] -= correction_i * nx
+                displacements[i, 1] -= correction_i * ny
+                displacements[i, 2] -= correction_i * nz
+
+                displacements[j, 0] += correction_j * nx
+                displacements[j, 1] += correction_j * ny
+                displacements[j, 2] += correction_j * nz
+
+        # Converged?
+        if overlap_max < overlap_tol:
+            return True
+
+        # Limit displacement magnitude
+        for i in range(Nt):
+            dx = displacements[i, 0]
+            dy = displacements[i, 1]
+            dz = displacements[i, 2]
+
+            displacement = math.sqrt(dx**2 + dy**2 + dz**2)
+
+            if displacement > displacement_max:
+                s = displacement_max / displacement
+                displacements[i, 0] *= s
+                displacements[i, 1] *= s
+                displacements[i, 2] *= s
+
+        # Apply simultaneously
+        box.centers += displacements
+
+        if box.periodic:
+            # Wrap periodic coordinates
+            for i in range(Nt):
+                box.centers[i, 0] = wrap(box.centers[i, 0], L)
+                box.centers[i, 1] = wrap(box.centers[i, 1], L)
+                box.centers[i, 2] = wrap(box.centers[i, 2], L)
+        else:
+            # Keep particles inside walls
+            for i in range(Nt):
+                r = current_radii[i]
+                box.centers[i, 0] = clip(box.centers[i, 0], r, L - r)
+                box.centers[i, 1] = clip(box.centers[i, 1], r, L - r)
+                box.centers[i, 2] = clip(box.centers[i, 2], r, L - r)
+
+    return False
+
+
+@nb.njit(fastmath=True)
 def build_cell_list(box: NBox) -> None:
     """
     Build a cell list for the particles in the box.
@@ -809,6 +1050,33 @@ def wrap(x: float, L: float) -> float:
         x -= L
 
     return x
+
+
+@nb.njit(inline="always")
+def clip(x: float, xmin: float, xmax: float) -> float:
+    """
+    Clip a value to a specified range.
+
+    Parameters
+    ----------
+    x : float
+        Value to clip.
+    xmin : float
+        Minimum allowed value.
+    xmax : float
+        Maximum allowed value.
+
+    Returns
+    -------
+    float
+        Clipped value.
+    """
+    if x > xmax:
+        return xmax
+    elif x < xmin:
+        return xmin
+    else:
+        return x
 
 
 @nb.njit(inline="always")
@@ -1543,6 +1811,22 @@ def _local_clearance_radius(box: NBox, point: NDArray) -> float:  # pragma: no c
     return R
 
 
+@nb.njit(inline="always")
+def random_unit_vector() -> tuple[float, float, float]:
+    """Generate a random unit vector uniformly distributed over the surface of a sphere.
+
+    Returns
+    -------
+    tuple[float, float, float]
+        Random unit vector coordinates (x, y, z).
+    """
+    z = np.random.uniform(-1.0, 1.0)
+    ϕ = np.random.uniform(0.0, 2.0 * pi)
+    rxy = math.sqrt(max(0.0, 1.0 - z * z))
+
+    return (rxy * math.cos(ϕ), rxy * math.sin(ϕ), z)
+
+
 @nb.njit(fastmath=True, inline="always")
 def random_point_on_sphere(center: NDArray, radius: float) -> NDArray:
     """
@@ -1560,14 +1844,12 @@ def random_point_on_sphere(center: NDArray, radius: float) -> NDArray:
     NDArray
         Random point on the surface of the sphere.
     """
-    z = np.random.uniform(-1.0, 1.0)
-    ϕ = np.random.uniform(0, 2.0 * pi)
-    xy_radius = math.sqrt(max(0.0, 1.0 - z * z))
+    direction = random_unit_vector()
 
     point = np.empty(3, dtype=np.float64)
-    point[0] = center[0] + radius * xy_radius * math.cos(ϕ)
-    point[1] = center[1] + radius * xy_radius * math.sin(ϕ)
-    point[2] = center[2] + radius * z
+    point[0] = center[0] + radius * direction[0]
+    point[1] = center[1] + radius * direction[1]
+    point[2] = center[2] + radius * direction[2]
 
     return point
 
