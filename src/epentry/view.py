@@ -132,6 +132,42 @@ def plot_with_matplotlib(
             zorder=10,
         )
 
+    # Box wireframe
+    Lbox = box.length
+    corners = np.array(
+        [
+            [0, 0, 0],
+            [Lbox, 0, 0],
+            [Lbox, Lbox, 0],
+            [0, Lbox, 0],
+            [0, 0, Lbox],
+            [Lbox, 0, Lbox],
+            [Lbox, Lbox, Lbox],
+            [0, Lbox, Lbox],
+        ]
+    )
+    box_edges = [
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),  # bottom face
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),  # top face
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),  # verticals
+    ]
+    for i, j in box_edges:
+        ax.plot(
+            *zip(corners[i], corners[j]),
+            color="gray",
+            linewidth=1,
+            zorder=1,
+        )
+
     # Limits and view setup
     xlim = (0.0, box.length)
     ax.set_xlim(*xlim)
