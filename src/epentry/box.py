@@ -83,13 +83,28 @@ class Box:
             )
         """)
 
-    def place_particles(
+    def generate_particles(
         self,
-        method: Literal["RSA", "SC", "BCC", "FCC", "Equilibrium"] = "RSA",
+        method: Literal["BCC", "FBR", "FCC", "MCR", "RSA", "SC"] = "RSA",
         periodic: bool = True,
     ) -> bool:
         """
         Generate a non-overlapping particle ensemble using a given method.
+
+        BCC: Particles are placed on a body-centered cubic lattice. The lattice spacing is
+        chosen to achieve the target volume fraction. This method is only valid for a
+        single particle group.
+
+        MCR: Particles are placed in a BCC lattice and then allowed to relax to
+        an equilibrium configuration using a Monte Carlo simulation. This method is only
+        valid for a single particle group.
+
+        FBR: Particle are initialized as points and then allowed to grow to their target
+        radii while avoiding overlaps using a force-biased relaxation algorithm.
+
+        FCC: Particles are placed on a face-centered cubic lattice. The lattice spacing is
+        chosen to achieve the target volume fraction. This method is only valid for a
+        single particle group.
 
         RSA: Particles are placed uniformly at random in a cubic simulation box. Candidate
         positions that overlap previously placed particles are rejected until a valid
@@ -99,18 +114,6 @@ class Box:
         SC: Particles are placed on a simple cubic lattice. The lattice spacing is chosen
         to achieve the target volume fraction. This method is only valid for a single
         particle group.
-
-        BCC: Particles are placed on a body-centered cubic lattice. The lattice spacing is
-        chosen to achieve the target volume fraction. This method is only valid for a
-        single particle group.
-
-        FCC: Particles are placed on a face-centered cubic lattice. The lattice spacing is
-        chosen to achieve the target volume fraction. This method is only valid for a
-        single particle group.
-
-        Equilibrium: Particles are placed in a BCC lattice and then allowed to relax to
-        an equilibrium configuration using a Monte Carlo simulation. This method is only
-        valid for a single particle group.
 
         Parameters
         ----------
@@ -133,11 +136,13 @@ class Box:
             return engine.generate_bcc(self._nbox)
         elif method == "FCC":
             return engine.generate_fcc(self._nbox)
-        elif method == "Equilibrium":
-            return engine.equilibrate_bcc(self._nbox)
+        elif method == "MCR":
+            return engine.generate_mcr(self._nbox)
+        elif method == "FBR":
+            return engine.generate_fbr(self._nbox)
         else:
             raise ValueError(
-                f"Invalid method '{method}'. Must be 'RSA', 'SC', 'BCC', 'FCC', or 'Equilibrium'."  # noqa: E501
+                f"Invalid method '{method}'. Must be 'BCC', 'FBR', 'FCC', 'MCR', 'RSA', or 'SC'."  # noqa: E501
             )
 
     def plot(
@@ -221,3 +226,47 @@ class Box:
             particle hit (if any) and time taken for the walk.
         """
         return engine.simulate_walk(self._nbox, D, rtol, maxsteps)
+
+    def radial_distribution(
+        self,
+        rmax: float,
+        nbins: int = 100,
+    ) -> tuple[NDArray, NDArray]:
+        """
+        Compute the radial distribution function g(r) of the particle ensemble.
+
+        g(r) measures the local particle density at distance `r` from a typical particle,
+        normalized by the density expected for a uniform random (ideal gas) distribution.
+        g(r) == 1 everywhere indicates no structure (a disordered fluid at low density);
+        sharp, narrow peaks at specific distances indicate crystalline order (e.g. a BCC
+        lattice has peaks at its characteristic nearest/next-nearest neighbor distances);
+        a liquid-like decaying oscillatory profile with a broad first peak is the expected
+        signature of an equilibrated hard-sphere fluid at finite volume fraction.
+
+        Note
+        ----
+        Uses direct O(N²) pairwise distances rather than the cell list, since this is
+        intended as an occasional post-hoc diagnostic (e.g. after `equilibrium_distribution`)
+        rather than something called every sweep. For periodic boxes, distances use the
+        minimum image convention, which is only valid for `rmax <= box.length / 2`; `rmax`
+        is silently clipped to this value if exceeded. For non-periodic boxes, no such
+        clipping is applied, but be aware that particles near the walls have systematically
+        fewer neighbors within `rmax` than particles in the bulk (a finite-size boundary
+        effect), which will bias g(r) low near larger `r` unless corrected for by the
+        caller.
+
+        Parameters
+        ----------
+        rmax : float | None
+            Maximum pair distance to consider. Clipped to `box.length / 2` for periodic
+            boxes (see Note).
+        nbins : int
+            Number of bins to divide `[0, rmax]` into.
+
+        Returns
+        -------
+        tuple[NDArray, NDArray]
+            `(r, g)` where `r` are the bin-center distances (length `nbins`) and `g` are
+            the corresponding g(r) values.
+        """
+        return engine.radial_distribution(self._nbox, rmax, nbins)
