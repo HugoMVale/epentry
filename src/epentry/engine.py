@@ -14,14 +14,14 @@ __all__ = [
     "generate_sc",
     "generate_bcc",
     "generate_fcc",
-    "equilibrate_bcc",
+    "generate_mcr",
     "simulate_multiple",
 ]
 
 
 METHOD_RSA = 0
 METHOD_BCC = 1
-METHOD_EQUIL = 2
+METHOD_MCR = 2
 METHOD_SC = 3
 METHOD_FCC = 4
 METHOD_FBR = 5
@@ -29,7 +29,7 @@ METHOD_FBR = 5
 METHODS = {
     METHOD_RSA: "Random Sequential Addition",
     METHOD_BCC: "Body-Centered Cubic",
-    METHOD_EQUIL: "Equilibrated Hard Spheres",
+    METHOD_MCR: "Monte-Carlo Relaxation",
     METHOD_SC: "Simple Cubic",
     METHOD_FCC: "Face-Centered Cubic",
     METHOD_FBR: "Force-Biased Relaxation",
@@ -221,7 +221,7 @@ def generate_rsa(
     cell_list: bool = True,
 ) -> bool:
     """
-    Generate a non-overlapping particle ensemble using random sequential addition.
+    Generate a random particle ensemble using Random Sequential Addition (RSA).
 
     Particles are placed uniformly at random in a cubic simulation box. Candidate
     positions that overlap previously placed particles are rejected until a valid
@@ -524,13 +524,13 @@ def generate_fcc(box: NBox, cell_list: bool = True) -> bool:
 
 
 @nb.njit(fastmath=True)
-def equilibrate_bcc(
+def generate_mcr(
     box: NBox,
     n_sweeps: int = 200,
     target_accept: float = 0.35,
 ) -> bool:
     """
-    Generate an equilibrated ensemble of particles.
+    Generate a random particle ensemble using Monte-Carlo Relaxation (MCR).
 
     A BCC lattice is first generated, and then an adaptive Monte Carlo procedure is
     used to equilibrate the particle ensemble. The maximum displacement for each particle
@@ -581,7 +581,7 @@ def equilibrate_bcc(
         delta *= math.exp(alpha * (naccept - target_accept))
         delta = min(max(delta, delta_min), delta_max)
 
-    box.method = METHOD_EQUIL
+    box.method = METHOD_MCR
     box.success = True
 
     return box.success
@@ -637,7 +637,7 @@ def montecarlo_sweep(box: NBox, delta: float) -> int:
 
 
 @nb.njit(fastmath=True)
-def generate_dense_ensemble(
+def generate_fbr(
     box: NBox,
     periodic: bool = True,
     cell_list: bool = True,
@@ -646,8 +646,7 @@ def generate_dense_ensemble(
     step_min: float = 1e-4,
 ) -> bool:
     """
-    Generate a dense disordered hard-sphere ensemble by particle growth and
-    geometric overlap projection.
+    Generate a random particle ensemble using Force-Biased Relaxation (FBR).
 
     Particles are first initialized as points uniformly distributed throughout
     the simulation box. Their radii are then increased adaptively towards the
@@ -1917,7 +1916,7 @@ def simulate_multiple(
         elif method == "BCC":
             generate_bcc(box, cell_list=True)
         elif method == "Equilibrium":
-            equilibrate_bcc(box)
+            generate_mcr(box)
         else:
             raise ValueError(f"Unknown method: {method}")
 
