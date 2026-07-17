@@ -46,7 +46,7 @@ def test_RSA_feasible():
     box = Box(rs, vfs, Nt)
     # RSA (all particles should be placed successfully)
     for periodic in [False, True]:
-        success_rsa = box.place_particles(method="RSA", periodic=periodic)
+        success_rsa = box.generate_particles(method="RSA", periodic=periodic)
         assert success_rsa
         assert box._nbox.success
         assert box._nbox.Nt == Nt
@@ -68,7 +68,7 @@ def test_RSA_infeasible():
     # This should break due to high volume fraction
     box = Box([1.0], [0.7], 100)
     for periodic in [False, True]:
-        box.place_particles(method="RSA", periodic=periodic)
+        box.generate_particles(method="RSA", periodic=periodic)
         assert not box._nbox.success
         assert box._nbox.Nt > 0
         assert box._nbox.Nt < box._nbox.Nt_target
@@ -85,7 +85,7 @@ def test_BCC_feasible():
     Nt = 100
     vf = 0.321456
     box = Box([1.0], [vf], Nt)
-    success_bcc = box.place_particles(method="BCC")
+    success_bcc = box.generate_particles(method="BCC")
     assert success_bcc
     assert box._nbox.success
     assert len(box._nbox.centers) == box._nbox.Nt
@@ -103,7 +103,7 @@ def test_BCC_infeasible():
     vf = 0.7
     box = Box([1.0], [vf], Nt)
     with pytest.raises(ValueError):
-        box.place_particles(method="BCC")
+        box.generate_particles(method="BCC")
 
 
 def test_cell_build_RSA():
@@ -131,7 +131,7 @@ def test_cell_build_RSA():
 
 def test_Equilibrium():
     box = Box([1.0], [0.63], Nt=100)
-    box.place_particles(method="Equilibrium")
+    box.generate_particles(method="Equilibrium")
     nbox = box._nbox
     for i in range(len(nbox.centers)):
         for j in range(i + 1, len(nbox.centers)):
@@ -141,7 +141,7 @@ def test_Equilibrium():
 def test_simulate_walk():
     box = Box([1.0], [0.3], Nt=100)
     for periodic in [False, True]:
-        box.place_particles(method="RSA", periodic=periodic)
+        box.generate_particles(method="RSA", periodic=periodic)
         walk = box.simulate_walk(D=1e-8)
         assert walk.success
         assert isinstance(walk.trajectory, np.ndarray) and walk.trajectory.shape[1] == 3
