@@ -19,7 +19,7 @@ def plot_with_matplotlib(
     box: NBox,
     walk: WalkResult | None = None,
     resolution: int = 18,
-    alpha: float = 0.5,
+    alpha: float = 1.0,
     elevation: float = 20.0,
     azimuth: float = 35.0,
 ) -> Figure:
@@ -186,7 +186,7 @@ def plot_with_pyvista(
     box: NBox,
     walk: WalkResult | None = None,
     resolution: int = 18,
-    alpha: float = 0.5,
+    alpha: float = 1.0,
     elevation: float = 20.0,
     azimuth: float = 35.0,
     clip: bool = False,
@@ -280,20 +280,29 @@ def plot_with_pyvista(
     )
     box_bounds = (0.0, Lbox, 0.0, Lbox, 0.0, Lbox)
 
-    # Process Real and Ghost  Particles
+    # Process Real and Ghost Particles
     for ghost_flag, opacity_mult in [(False, 1.0), (True, 0.3)]:
         mask = is_ghost if ghost_flag else ~is_ghost
         if ghost_flag and not np.any(mask):
             continue
 
-        pc = pv.PolyData(curr_centers[mask])
-        pc["radius"] = curr_radii[mask]
-        pc["group_idx"] = all_group_indices[mask]
-
-        mesh = pc.glyph(scale="radius", geom=sphere_template, orient=False)
         if periodic and clip:
-            mesh = mesh.clip_box(bounds=box_bounds, invert=False)
-        mesh = mesh.point_data_to_cell_data()
+            mesh = _clip_spheres_to_box(
+                curr_centers[mask],
+                curr_radii[mask],
+                all_group_indices[mask],
+                sphere_template,
+                box_bounds,
+            )
+            if mesh.n_points == 0:
+                continue
+        else:
+            pc = pv.PolyData(curr_centers[mask])
+            pc["radius"] = curr_radii[mask]
+            pc["group_idx"] = all_group_indices[mask]
+
+            mesh = pc.glyph(scale="radius", geom=sphere_template, orient=False)
+            mesh = mesh.point_data_to_cell_data()
 
         plotter.add_mesh(
             mesh,
@@ -373,3 +382,130 @@ def plot_with_pyvista(
     plotter.reset_camera()
 
     return plotter
+
+
+def _plane_disc_cap(
+    center: np.ndarray,
+    radius: float,
+    axis: int,
+    coord: float,
+    keep_ge: bool,
+    other_active: list[tuple[int, float, bool]],
+    n_seg: int = 48,
+) -> pv.PolyData | None:
+    """Build the exact flat disc cap where a sphere intersects a plane.
+
+    A sphere cut by a plane is always a circle, so the cap can be built analytically
+    instead of relying on VTK's hole-filling heuristics (which behave inconsistently
+    across axes/particles). If the sphere also crosses other planes at the same time
+    (a corner particle), the disc is trimmed against those planes too via
+    Sutherland-Hodgman polygon clipping, since the visible cap on one face can be a
+    lens/wedge rather than a full circle.
+    """
+    dist = center[axis] - coord
+    r2 = radius**2 - dist**2
+    if r2 <= 0:
+        return None
+    rp = np.sqrt(r2)
+    c_disc = center.copy()
+    c_disc[axis] = coord
+
+    other_axes = [a for a in (0, 1, 2) if a != axis]
+    u_axis, v_axis = other_axes
+    u = np.zeros(3)
+    u[u_axis] = 1.0
+    v = np.zeros(3)
+    v[v_axis] = 1.0
+
+    t = np.linspace(0, 2 * np.pi, n_seg, endpoint=False)
+    poly = [c_disc + rp * np.cos(ti) * u + rp * np.sin(ti) * v for ti in t]
+
+    for oaxis, ocoord, okeep_ge in other_active:
+        clipped = []
+        n = len(poly)
+        for i in range(n):
+            p1, p2 = poly[i], poly[(i + 1) % n]
+            d1 = (p1[oaxis] - ocoord) if okeep_ge else (ocoord - p1[oaxis])
+            d2 = (p2[oaxis] - ocoord) if okeep_ge else (ocoord - p2[oaxis])
+            in1, in2 = d1 >= 0, d2 >= 0
+            if in1:
+                clipped.append(p1)
+            if in1 != in2:
+                tt = d1 / (d1 - d2)
+                clipped.append(p1 + tt * (p2 - p1))
+        poly = clipped
+        if len(poly) < 3:
+            return None
+
+    poly = np.array(poly)
+    centroid = poly.mean(axis=0)
+    pts = np.vstack([centroid, poly])
+    n = len(poly)
+    faces = np.hstack([[3, 0, i + 1, (i + 1) % n + 1] for i in range(n)])
+
+    mesh = pv.PolyData(pts, faces)
+    normal = np.zeros(3)
+    normal[axis] = -1.0 if keep_ge else 1.0
+    mesh.point_data["Normals"] = np.tile(normal, (mesh.n_points, 1))
+    return mesh
+
+
+def _clip_spheres_to_box(
+    centers: np.ndarray,
+    radii: np.ndarray,
+    group_indices: np.ndarray,
+    sphere_template: pv.PolyData,
+    bounds: tuple[float, float, float, float, float, float],
+) -> pv.PolyData:
+    """Clip each glyphed sphere to an axis-aligned box, capping the cut with exact
+    analytic discs, and reattach the (constant per-sphere) group scalar since
+    clipping/capping does not propagate point/cell data.
+    """
+    xmin, xmax, ymin, ymax, zmin, zmax = bounds
+
+    pieces = []
+    for center, radius, gidx in zip(centers, radii, group_indices):
+        active = []
+        if center[0] - radius < xmin:
+            active.append((0, xmin, True))
+        if center[0] + radius > xmax:
+            active.append((0, xmax, False))
+        if center[1] - radius < ymin:
+            active.append((1, ymin, True))
+        if center[1] + radius > ymax:
+            active.append((1, ymax, False))
+        if center[2] - radius < zmin:
+            active.append((2, zmin, True))
+        if center[2] + radius > zmax:
+            active.append((2, zmax, False))
+
+        if not active:
+            sphere = sphere_template.copy()
+            sphere.points = sphere.points * radius + center
+            sphere = sphere.compute_normals(
+                auto_orient_normals=True, consistent_normals=True
+            )
+            sphere.cell_data["group_idx"] = np.full(sphere.n_cells, gidx)
+            pieces.append(sphere)
+            continue
+
+        sphere = sphere_template.copy()
+        sphere.points = sphere.points * radius + center
+        shell = sphere.clip_box(bounds, invert=False).extract_surface(
+            algorithm="dataset_surface"
+        )
+        if shell.n_points == 0:
+            continue
+        shell = shell.compute_normals(auto_orient_normals=True, consistent_normals=True)
+        shell.cell_data["group_idx"] = np.full(shell.n_cells, gidx)
+        pieces.append(shell)
+
+        for axis, coord, keep_ge in active:
+            others = [a for a in active if a[0] != axis]
+            cap = _plane_disc_cap(center, radius, axis, coord, keep_ge, others)
+            if cap is None:
+                continue
+            cap.cell_data["group_idx"] = np.full(cap.n_cells, gidx)
+            pieces.append(cap)
+
+    return pv.merge(pieces) if pieces else pv.PolyData()
