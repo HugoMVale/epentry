@@ -153,6 +153,7 @@ class Box:
         alpha: float = 0.5,
         elevation: float = 20.0,
         azimuth: float = 35.0,
+        clip: bool = False,
     ) -> Figure | pv.Plotter:
         """
         Plot a 3D visualization of the particles and the random walk.
@@ -176,6 +177,9 @@ class Box:
             Elevation angle in the z plane for the 3D plot view.
         azimuth : float
             Azimuth angle in the x,y plane for the 3D plot view.
+        clip : bool
+            Whether to clip particles to the box boundaries. Only relevant for the
+            `"pyvista"` backend.
 
         Returns
         -------
@@ -188,7 +192,7 @@ class Box:
             )
         elif backend == "pyvista":
             return view.plot_with_pyvista(
-                self._nbox, walk, resolution, alpha, elevation, azimuth
+                self._nbox, walk, resolution, alpha, elevation, azimuth, clip
             )
         else:
             raise ValueError(

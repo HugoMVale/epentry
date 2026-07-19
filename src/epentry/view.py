@@ -1,3 +1,5 @@
+import itertools
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pyvista as pv
@@ -187,6 +189,7 @@ def plot_with_pyvista(
     alpha: float = 0.5,
     elevation: float = 20.0,
     azimuth: float = 35.0,
+    clip: bool = False,
 ) -> pv.Plotter:
     """
     Plot a 3D visualization of the particles and the random walk using `pyvista`.
@@ -210,6 +213,8 @@ def plot_with_pyvista(
         Elevation angle in the z plane for the 3D plot view.
     azimuth : float
         Azimuth angle in the x,y plane for the 3D plot view.
+    clip : bool
+        Whether to clip particles to the box boundaries.
 
     Returns
     -------
@@ -229,36 +234,36 @@ def plot_with_pyvista(
     is_ghost = np.zeros(len(centers), dtype=bool)
 
     if periodic:
-        for dim in range(3):
-            new_c_list, new_r_list, new_g_list = [], [], []
+        offsets = np.array(
+            [off for off in itertools.product((-1, 0, 1), repeat=3) if off != (0, 0, 0)]
+        )  # shape (26, 3)
 
-            mask_low = (curr_centers[:, dim] - curr_radii) < 0
-            if np.any(mask_low):
-                c_low = curr_centers[mask_low].copy()
-                c_low[:, dim] += Lbox
-                new_c_list.append(c_low)
-                new_r_list.append(curr_radii[mask_low])
-                new_g_list.append(curr_groups[mask_low])
+        ghost_c_list, ghost_r_list, ghost_g_list = [], [], []
+        for offset in offsets:
+            shifted = centers + offset * Lbox
+            clamped = np.clip(shifted, 0.0, Lbox)
+            dist = np.linalg.norm(shifted - clamped, axis=1)
 
-            mask_high = (curr_centers[:, dim] + curr_radii) > Lbox
-            if np.any(mask_high):
-                c_high = curr_centers[mask_high].copy()
-                c_high[:, dim] -= Lbox
-                new_c_list.append(c_high)
-                new_r_list.append(curr_radii[mask_high])
-                new_g_list.append(curr_groups[mask_high])
+            mask = dist < radii
+            if np.any(mask):
+                ghost_c_list.append(shifted[mask])
+                ghost_r_list.append(radii[mask])
+                ghost_g_list.append(groups[mask])
 
-            if new_c_list:
-                new_centers = np.vstack(new_c_list)
-                new_radii = np.concatenate(new_r_list)
-                new_groups = np.concatenate(new_g_list)
-                new_ghosts = np.ones(len(new_centers), dtype=bool)
+        if ghost_c_list:
+            new_centers = np.vstack(ghost_c_list)
+            new_radii = np.concatenate(ghost_r_list)
+            new_groups = np.concatenate(ghost_g_list)
 
-                # Stack new ghosts into the working arrays
-                curr_centers = np.vstack([curr_centers, new_centers])
-                curr_radii = np.concatenate([curr_radii, new_radii])
-                curr_groups = np.concatenate([curr_groups, new_groups])
-                is_ghost = np.concatenate([is_ghost, new_ghosts])
+            curr_centers = np.vstack([centers, new_centers])
+            curr_radii = np.concatenate([radii, new_radii])
+            curr_groups = np.concatenate([groups, new_groups])
+            is_ghost = np.concatenate(
+                [
+                    np.zeros(len(centers), dtype=bool),
+                    np.ones(len(new_centers), dtype=bool),
+                ]
+            )
 
     # Global Group Mapping (Ensures consistent colors across real and ghost meshes)
     unique_groups, all_group_indices = np.unique(curr_groups, return_inverse=True)
@@ -286,7 +291,7 @@ def plot_with_pyvista(
         pc["group_idx"] = all_group_indices[mask]
 
         mesh = pc.glyph(scale="radius", geom=sphere_template, orient=False)
-        if periodic:
+        if periodic and clip:
             mesh = mesh.clip_box(bounds=box_bounds, invert=False)
         mesh = mesh.point_data_to_cell_data()
 
