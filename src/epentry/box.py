@@ -150,7 +150,7 @@ class Box:
         walk: WalkResult | None = None,
         backend: Literal["matplotlib", "pyvista"] = "pyvista",
         resolution: int = 18,
-        alpha: float = 0.5,
+        alpha: float = 1.0,
         elevation: float = 20.0,
         azimuth: float = 35.0,
         clip: bool = False,
