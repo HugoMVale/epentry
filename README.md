@@ -4,4 +4,4 @@ epentry is a small Python package for simulating the rate at which radicals ente
 
 For a worked example and visual walkthrough, see the notebook in [notebooks/getting-started.ipynb](notebooks/getting-started.ipynb).
 
-![Radical entry](notebooks/radical-entry.png)
+![Radical entry](notebooks/images/radical-entry.png)
