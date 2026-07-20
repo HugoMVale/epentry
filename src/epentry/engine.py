@@ -526,8 +526,9 @@ def generate_fcc(box: NBox, cell_list: bool = True) -> bool:
 @nb.njit(fastmath=True)
 def generate_mcr(
     box: NBox,
-    n_sweeps: int = 200,
-    target_accept: float = 0.35,
+    accept_target: float = 0.30,
+    rms_target: float = 0.50,
+    n_sweeps: int = -1,
 ) -> bool:
     """
     Generate a random particle ensemble using Monte-Carlo Relaxation (MCR).
@@ -543,12 +544,17 @@ def generate_mcr(
     ----------
     box : NBox
         Box object containing the particle ensemble.
-    n_sweeps : int
-        Number of Monte Carlo sweeps to perform. One sweep consists of one attempted
-        move for each particle in the box.
-    target_accept : float
+    accept_target : float
         Target acceptance ratio for the adaptive Monte Carlo. The maximum displacement
         for each particle is adjusted to achieve this acceptance ratio.
+    rms_target : float
+        Target root-mean-square displacement for the adaptive Monte Carlo. The
+        equilibration will stop when the mean-squared displacement of the particles
+        exceeds this value.
+    n_sweeps : int
+        Number of Monte Carlo sweeps. One sweep consists of one attempted move for each
+        particle in the box. If this parameter is positive, the equilibration will stop
+        after this many sweeps.
 
     Returns
     -------
@@ -558,28 +564,43 @@ def generate_mcr(
     # Generate BCC lattice
     generate_bcc(box, cell_list=True)
 
-    # Compute initial gap between nearest neighbors
+    # Reference configuration for MSD
+    centers0 = box.centers.copy()
+
+    # Compute initial nearest-neighbour gap
     r = box.radii[0]
     Nt = box.Nt
     a = box.lattice_a
-    gap = math.sqrt(3) / 2 * a - 2.0 * r
+    gap = math.sqrt(3.0) / 2.0 * a - 2.0 * r
 
     # Adaptive Monte Carlo equilibration
-    alpha = 0.2
-    block = 10
-    delta = 0.2 * gap
-    delta_max = 0.5 * gap
+    alpha = 0.3
+    block = 50
+    delta = 1.0 * gap
+    delta_max = 2.0 * gap
     delta_min = 1e-3 * gap
-    for _ in range(n_sweeps // block):
-        naccept = 0
+    msd_target = (rms_target * a) ** 2
+    sweeps = 0
 
-        for _ in range(block):
-            naccept += montecarlo_sweep(box, delta)
+    if n_sweeps != 0:
+        while True:
+            naccept = 0
 
-        naccept /= block * Nt
+            for _ in range(block):
+                naccept += montecarlo_sweep(box, delta)
 
-        delta *= math.exp(alpha * (naccept - target_accept))
-        delta = min(max(delta, delta_min), delta_max)
+            sweeps += block
+
+            accept = naccept / (block * Nt)
+            delta *= math.exp(alpha * (accept - accept_target))
+            delta = min(max(delta, delta_min), delta_max)
+
+            if n_sweeps > 0 and sweeps >= n_sweeps:
+                break
+
+            msd = mean_squared_displacement(box, centers0)
+            if msd >= msd_target:
+                break
 
     box.method = METHOD_MCR
     box.success = True
@@ -648,10 +669,9 @@ def generate_fbr(
     """
     Generate a random particle ensemble using Force-Biased Relaxation (FBR).
 
-    Particles are first initialized as points uniformly distributed throughout
-    the simulation box. Their radii are then increased adaptively towards the
-    target radii. After each growth increment, overlaps are removed by repeated
-    geometric projection.
+    Particles are first initialized as points uniformly distributed throughout the
+    simulation box. Their radii are then increased adaptively towards the target radii.
+    After each growth increment, overlaps are removed by repeated geometric projection.
 
     Growth is adaptive:
         * easy relaxations -> larger growth steps
@@ -1851,77 +1871,3 @@ def random_point_on_sphere(center: NDArray, radius: float) -> NDArray:
     point[2] = center[2] + radius * direction[2]
 
     return point
-
-
-# @nb.njit
-def simulate_multiple(
-    rs: NDArray,
-    vfs: NDArray,
-    number_boxes: int,
-    number_particles_per_box: int,
-    number_walks_per_box: int,
-    D: float = 1.0,
-    periodic: bool = True,
-    method: Literal["RSA", "BCC", "Equilibrium"] = "RSA",
-) -> list[WalkResult]:
-    """
-    Simulate multiple random walks in across multiple boxes.
-
-    Multiple boxes are generated with the same target particle group parameters but
-    different random placements of particles. Multiple random walks are simulated
-    in each box.
-
-    Notes
-    -----
-    I should refactor to return the boxes as well, because certain properrties are
-    easier to get from the box.
-
-    Parameters
-    ----------
-    rs : NDArray
-        Particle radii of each group.
-    vfs : NDArray
-        Target volume fractions of each group.
-    number_boxes : int
-        Number of boxes to simulate in parallel.
-    number_particles_per_box : int
-        Number of particles to place in each box.
-    number_walks_per_box : int
-        Number of random walks to simulate in each box.
-    D : float
-        Diffusion coefficient of the random walker.
-    periodic : bool
-        Whether to apply periodic boundary conditions.
-
-    Returns
-    -------
-    list[Walk]
-        List of random walks simulated across all boxes.
-    """
-    walks = []
-    for i in range(number_boxes):
-        box = NBox(rs, vfs, number_particles_per_box)
-
-        if method == "RSA":
-            # RSA can fail at high volume fractions, so we try multiple times
-            success = False
-            for _ in range(10):
-                success = generate_rsa(box, periodic=periodic, cell_list=False)
-                if success:
-                    build_cell_list(box)
-                    break
-            if not success:
-                print("  Failed to fill box after 10 attempts. Skipping.")
-                continue
-        elif method == "BCC":
-            generate_bcc(box, cell_list=True)
-        elif method == "Equilibrium":
-            generate_mcr(box)
-        else:
-            raise ValueError(f"Unknown method: {method}")
-
-        for _ in range(number_walks_per_box):
-            walk = simulate_walk(box, D=D)
-            walks.append(walk)
-
-    return walks
