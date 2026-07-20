@@ -131,7 +131,7 @@ def test_cell_build_RSA():
 
 def test_Equilibrium():
     box = Box([1.0], [0.63], Nt=100)
-    box.generate_particles(method="Equilibrium")
+    box.generate_particles(method="MCR")
     nbox = box._nbox
     for i in range(len(nbox.centers)):
         for j in range(i + 1, len(nbox.centers)):
