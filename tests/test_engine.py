@@ -129,9 +129,9 @@ def test_cell_build_RSA():
         assert once_outside
 
 
-def test_Equilibrium():
-    box = Box([1.0], [0.63], Nt=100)
-    box.generate_particles(method="MCR")
+def test_EBCC():
+    box = Box([1.0], [0.50], Nt=100)
+    box.generate_particles(method="EBCC")
     nbox = box._nbox
     for i in range(len(nbox.centers)):
         for j in range(i + 1, len(nbox.centers)):

@@ -1,6 +1,5 @@
 import math
 from math import pi
-from typing import Literal
 
 import numba as nb
 import numpy as np
@@ -14,14 +13,14 @@ __all__ = [
     "generate_sc",
     "generate_bcc",
     "generate_fcc",
-    "generate_mcr",
-    "simulate_multiple",
+    "generate_ebcc",
+    "generate_fbr",
 ]
 
 
 METHOD_RSA = 0
 METHOD_BCC = 1
-METHOD_MCR = 2
+METHOD_EBCC = 2
 METHOD_SC = 3
 METHOD_FCC = 4
 METHOD_FBR = 5
@@ -29,7 +28,7 @@ METHOD_FBR = 5
 METHODS = {
     METHOD_RSA: "Random Sequential Addition",
     METHOD_BCC: "Body-Centered Cubic",
-    METHOD_MCR: "Monte-Carlo Relaxation",
+    METHOD_EBCC: "Equilibrated Body-Centered Cubic",
     METHOD_SC: "Simple Cubic",
     METHOD_FCC: "Face-Centered Cubic",
     METHOD_FBR: "Force-Biased Relaxation",
@@ -524,14 +523,14 @@ def generate_fcc(box: NBox, cell_list: bool = True) -> bool:
 
 
 @nb.njit(fastmath=True)
-def generate_mcr(
+def generate_ebcc(
     box: NBox,
     accept_target: float = 0.30,
     rms_target: float = 0.50,
     n_sweeps: int = -1,
 ) -> bool:
     """
-    Generate a random particle ensemble using Monte-Carlo Relaxation (MCR).
+    Generate a random particle ensemble using Equilibrated BCC (EBCC).
 
     A BCC lattice is first generated, and then an adaptive Monte Carlo procedure is
     used to equilibrate the particle ensemble. The maximum displacement for each particle
@@ -602,7 +601,7 @@ def generate_mcr(
             if msd >= msd_target:
                 break
 
-    box.method = METHOD_MCR
+    box.method = METHOD_EBCC
     box.success = True
 
     return box.success

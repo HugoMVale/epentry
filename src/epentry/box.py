@@ -85,7 +85,7 @@ class Box:
 
     def generate_particles(
         self,
-        method: Literal["BCC", "FBR", "FCC", "MCR", "RSA", "SC"] = "RSA",
+        method: Literal["BCC", "FBR", "FCC", "EBCC", "RSA", "SC"] = "RSA",
         **kwargs,
     ) -> bool:
         """
@@ -95,7 +95,7 @@ class Box:
         chosen to achieve the target volume fraction. This method is only valid for a
         single particle group.
 
-        MCR: Particles are placed in a BCC lattice and then allowed to relax to
+        EBCC: Particles are placed in a BCC lattice and then allowed to relax to
         an equilibrium configuration using a Monte Carlo simulation. This method is only
         valid for a single particle group.
 
@@ -117,7 +117,7 @@ class Box:
 
         Parameters
         ----------
-        method : Literal["BCC", "FBR", "FCC", "MCR", "RSA", "SC"]
+        method : Literal["BCC", "FBR", "FCC", "EBCC", "RSA", "SC"]
             Method to use for particle generation.
         kwargs
             Additional keyword arguments to pass to the particle generation method.
@@ -137,13 +137,13 @@ class Box:
             return engine.generate_bcc(self._nbox, **kwargs)
         elif method == "FCC":
             return engine.generate_fcc(self._nbox, **kwargs)
-        elif method == "MCR":
-            return engine.generate_mcr(self._nbox, **kwargs)
+        elif method == "EBCC":
+            return engine.generate_ebcc(self._nbox, **kwargs)
         elif method == "FBR":
             return engine.generate_fbr(self._nbox, **kwargs)
         else:
             raise ValueError(
-                f"Invalid method '{method}'. Must be 'BCC', 'FBR', 'FCC', 'MCR', 'RSA', or 'SC'."  # noqa: E501
+                f"Invalid method '{method}'. Must be 'BCC', 'FBR', 'FCC', 'EBCC', 'RSA', or 'SC'."  # noqa: E501
             )
 
     def plot(
