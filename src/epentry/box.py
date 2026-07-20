@@ -4,7 +4,7 @@ from typing import Literal
 import numpy as np
 import pyvista as pv
 from matplotlib.figure import Figure
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 
 import epentry.engine as engine
 import epentry.view as view
@@ -86,7 +86,7 @@ class Box:
     def generate_particles(
         self,
         method: Literal["BCC", "FBR", "FCC", "MCR", "RSA", "SC"] = "RSA",
-        periodic: bool = True,
+        **kwargs,
     ) -> bool:
         """
         Generate a non-overlapping particle ensemble using a given method.
@@ -117,9 +117,10 @@ class Box:
 
         Parameters
         ----------
-        periodic : bool
-            Whether to apply periodic boundary conditions. Only relevant for the RSA
-            method.
+        method : Literal["BCC", "FBR", "FCC", "MCR", "RSA", "SC"]
+            Method to use for particle generation.
+        kwargs
+            Additional keyword arguments to pass to the particle generation method.
 
         Returns
         -------
@@ -129,17 +130,17 @@ class Box:
 
         """
         if method == "RSA":
-            return engine.generate_rsa(self._nbox, periodic)
+            return engine.generate_rsa(self._nbox, **kwargs)
         elif method == "SC":
-            return engine.generate_sc(self._nbox)
+            return engine.generate_sc(self._nbox, **kwargs)
         elif method == "BCC":
-            return engine.generate_bcc(self._nbox)
+            return engine.generate_bcc(self._nbox, **kwargs)
         elif method == "FCC":
-            return engine.generate_fcc(self._nbox)
+            return engine.generate_fcc(self._nbox, **kwargs)
         elif method == "MCR":
-            return engine.generate_mcr(self._nbox)
+            return engine.generate_mcr(self._nbox, **kwargs)
         elif method == "FBR":
-            return engine.generate_fbr(self._nbox)
+            return engine.generate_fbr(self._nbox, **kwargs)
         else:
             raise ValueError(
                 f"Invalid method '{method}'. Must be 'BCC', 'FBR', 'FCC', 'MCR', 'RSA', or 'SC'."  # noqa: E501
@@ -274,3 +275,76 @@ class Box:
             the corresponding g(r) values.
         """
         return engine.radial_distribution(self._nbox, rmax, nbins)
+
+
+def simulate_multiple(
+    rs: ArrayLike,
+    vfs: ArrayLike,
+    number_boxes: int,
+    number_particles_per_box: int,
+    number_walks_per_box: int,
+    D: float = 1.0,
+    periodic: bool = True,
+    method: str = "RSA",
+) -> list[WalkResult]:
+    """
+    Simulate multiple random walks in across multiple boxes.
+
+    Multiple boxes are generated with the same target particle group parameters but
+    different random placements of particles. Multiple random walks are simulated
+    in each box.
+
+    Notes
+    -----
+    I should refactor to return the boxes as well, because certain properrties are
+    easier to get from the box.
+
+    Parameters
+    ----------
+    rs : ArrayLike
+        Particle radii of each group.
+    vfs : ArrayLike
+        Target volume fractions of each group.
+    number_boxes : int
+        Number of boxes to simulate in parallel.
+    number_particles_per_box : int
+        Number of particles to place in each box.
+    number_walks_per_box : int
+        Number of random walks to simulate in each box.
+    D : float
+        Diffusion coefficient of the random walker.
+    periodic : bool
+        Whether to apply periodic boundary conditions.
+    method: str
+        Method to use for particle generation.
+
+    Returns
+    -------
+    list[Walk]
+        List of random walks simulated across all boxes.
+    """
+    walks = []
+    for i in range(number_boxes):
+        box = Box(rs, vfs, number_particles_per_box)
+
+        if method == "RSA":
+            # RSA can fail at high volume fractions, so we try multiple times
+            success = False
+            for _ in range(10):
+                success = box.generate_particles(
+                    method="RSA", periodic=periodic, cell_list=False
+                )
+                if success:
+                    engine.build_cell_list(box._nbox)
+                    break
+            if not success:
+                print("  Failed to fill box after 10 attempts. Skipping.")
+                continue
+        else:
+            box.generate_particles(method=method)
+
+        for _ in range(number_walks_per_box):
+            walk = box.simulate_walk(D=D)
+            walks.append(walk)
+
+    return walks
